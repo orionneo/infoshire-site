@@ -12,7 +12,32 @@ import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/contexts/AuthContext';
 import routes from './routes';
 
+// ✅ executa antes do Supabase/AuthProvider montar (evita AbortError)
+function preHandleOAuthCode() {
+  try {
+    const searchParams = new URLSearchParams(window.location.search);
+    const code = searchParams.get('code');
+
+    // Se voltou do Google como "/?code=...#/login" ou "/?code=..."
+    // e ainda não está em "#/auth/callback", reescreve tudo
+    if (code && !window.location.hash.includes('/auth/callback')) {
+      const newUrl = `${window.location.origin}${window.location.pathname}#/auth/callback?code=${encodeURIComponent(code)}`;
+      window.location.replace(newUrl);
+      return true; // interrompe render
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 const App: React.FC = () => {
+  // ✅ se tiver code, já redirecionou e não renderiza nada agora
+  if (typeof window !== 'undefined' && preHandleOAuthCode()) {
+    return null;
+  }
+
   return (
     <Router>
       <AuthProvider>

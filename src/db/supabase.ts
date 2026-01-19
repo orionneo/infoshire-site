@@ -1,16 +1,19 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    flowType: "pkce",
+    flowType: 'pkce',
     autoRefreshToken: true,
     persistSession: true,
 
-    // ✅ IMPORTANTE no GitHub Pages + HashRouter:
-    // a gente controla o "code" no AuthContext, então desliga o auto parser
+    // ✅ MUITO IMPORTANTE com HashRouter + GH Pages:
+    // não deixa o supabase tentar ler code da URL sozinho
     detectSessionInUrl: false,
+
+    // ✅ evita conflito/lock com outras builds/projetos
+    storageKey: 'infoshire-auth',
   },
 });
