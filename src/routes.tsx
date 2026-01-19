@@ -74,6 +74,11 @@ const routes: RouteConfig[] = [
     path: '/login',
     element: <Login />,
   },
+    {
+    name: 'Auth Callback',
+    path: '/auth/callback',
+    element: <AuthCallback />,
+  },
   {
     name: 'Register',
     path: '/register',
@@ -198,7 +203,6 @@ const routes: RouteConfig[] = [
     path: '/admin/warranty-search',
     element: <WarrantySearch />,
   },
-  { path: '/auth/callback', element: <AuthCallback /> },  
   {
     name: 'Warranty List',
     path: '/admin/warranty-list',
