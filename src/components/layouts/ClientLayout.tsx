@@ -1,4 +1,4 @@
-import { LogOut, Menu, Package, User, Wrench } from 'lucide-react';
+import { Home, LogOut, Menu, Package, User, Wrench } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -20,7 +20,9 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
     navigate('/');
   };
 
+  // ✅ Inclui "Voltar ao site" no menu do cliente
   const navItems = [
+    { to: '/', label: 'Voltar ao site', icon: Home },
     { to: '/client', label: 'Minhas Ordens', icon: Package },
     { to: '/client/profile', label: 'Perfil', icon: User },
   ];
@@ -36,7 +38,7 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
 
       <div className="flex-1 py-6">
         <nav className="space-y-2 px-3">
-          {/* NOVO: Completar Cadastro (se faltar phone) */}
+          {/* Completar Cadastro (se faltar phone) */}
           {needsPhone && (
             <Button
               variant="outline"
@@ -72,6 +74,7 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
           <p className="text-sm font-medium">{profile?.name || 'Cliente'}</p>
           <p className="text-xs text-muted-foreground">{profile?.email}</p>
         </div>
+
         <Button variant="outline" className="w-full" onClick={handleSignOut}>
           <LogOut className="h-4 w-4 mr-2" />
           Sair
@@ -98,12 +101,14 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
               <Wrench className="h-6 w-6 text-primary" />
               <span className="font-bold text-xl">InfoShire</span>
             </div>
+
             <Sheet>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="icon">
                   <Menu className="h-6 w-6" />
                 </Button>
               </SheetTrigger>
+
               <SheetContent side="left" className="w-64 p-0">
                 <div className="flex flex-col h-full">
                   <SidebarContent />
