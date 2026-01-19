@@ -21,10 +21,7 @@ const PUBLIC_ROUTES = [
   '/init-admin',
   '/approve/*',
   '/rastrear-os',
-
-  // ✅ OAuth callback precisa ser público
-  '/auth/callback',
-  '/auth/callback/*',
+  '/auth/callback', // ✅ importantíssimo
 ];
 
 function matchPublicRoute(path: string, patterns: string[]) {

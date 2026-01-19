@@ -12,15 +12,24 @@ import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/contexts/AuthContext';
 import routes from './routes';
 
-const isGitHubPages =
-  window.location.hostname === 'orionneo.github.io'; // ✅ QA
-// depois, quando for produção, cai automaticamente no BrowserRouter
+const base = import.meta.env.BASE_URL || '/';
 
-const Router = isGitHubPages ? HashRouter : BrowserRouter;
+// ✅ Regra simples:
+// - GitHub Pages (repo): BASE_URL = "/infoshire-site/" -> usa HashRouter
+// - Domínio (prod): BASE_URL = "/" -> usa BrowserRouter
+const useHashRouter = base !== '/';
+
+const RouterComponent: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  return useHashRouter ? (
+    <HashRouter basename={base}>{children}</HashRouter>
+  ) : (
+    <BrowserRouter basename={base}>{children}</BrowserRouter>
+  );
+};
 
 const App: React.FC = () => {
   return (
-    <Router basename={isGitHubPages ? undefined : import.meta.env.BASE_URL}>
+    <RouterComponent>
       <AuthProvider>
         <StatePersistence>
           <RouteGuard>
@@ -28,6 +37,7 @@ const App: React.FC = () => {
             <IntersectObserver />
             <AnalyticsTracker />
             <GlobalGamerBackground />
+
             <div className="flex flex-col min-h-screen relative z-10">
               <main className="flex-grow">
                 <Routes>
@@ -38,13 +48,14 @@ const App: React.FC = () => {
                 </Routes>
               </main>
             </div>
+
             <PWAInstallPrompt />
             <ConnectionStatus />
             <Toaster />
           </RouteGuard>
         </StatePersistence>
       </AuthProvider>
-    </Router>
+    </RouterComponent>
   );
 };
 
