@@ -245,25 +245,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
-    try {
-      // ✅ GitHub Pages base path (ex: /infoshire-site/)
-      const base = import.meta.env.BASE_URL || '/';
-      const redirectTo = `${window.location.origin}${base}`;
+  try {
+    // ✅ volta para a base do GH Pages (sem hash)
+    const base = import.meta.env.BASE_URL || '/';
+    const redirectTo = `${window.location.origin}${base}`;
 
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo, // volta para /infoshire-site/ (com ?code=...)
-          queryParams: { access_type: 'offline', prompt: 'consent' },
-        },
-      });
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+        queryParams: { access_type: 'offline', prompt: 'consent' },
+      },
+    });
 
-      if (error) throw error;
-      return { error: null };
-    } catch (error) {
-      return { error: error as Error };
-    }
-  };
+    if (error) throw error;
+    return { error: null };
+  } catch (error) {
+    return { error: error as Error };
+  }
+};
 
   const signOut = async () => {
     await supabase.auth.signOut();
