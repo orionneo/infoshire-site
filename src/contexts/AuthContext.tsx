@@ -282,29 +282,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signInWithGoogle = async () => {
-    try {
-      const isGithubPages = window.location.hostname.endsWith('github.io');
-      const basePath = isGithubPages ? '/infoshire-site' : '';
+const signInWithGoogle = async () => {
+  try {
+    // ✅ Volta para a HOME do GitHub Pages (sem /auth/callback)
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
 
-      // Mesmo que o Supabase ignore e volte com ?code=...#/login,
-      // nosso INIT vai capturar e trocar a sessão.
-      const redirectTo = `${window.location.origin}${basePath}/#/auth/callback`;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+        queryParams: { access_type: 'offline', prompt: 'consent' },
+      },
+    });
 
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo,
-          queryParams: { access_type: 'offline', prompt: 'consent' },
-        },
-      });
-
-      if (error) throw error;
-      return { error: null };
-    } catch (error) {
-      return { error: error as Error };
-    }
-  };
+    if (error) throw error;
+    return { error: null };
+  } catch (error) {
+    return { error: error as Error };
+  }
+};
 
   const signOut = async () => {
     await supabase.auth.signOut();

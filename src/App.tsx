@@ -1,5 +1,5 @@
-import React from 'react';
-import { Navigate, Route, HashRouter as Router, Routes } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { Navigate, Route, HashRouter as Router, Routes, useNavigate } from 'react-router-dom';
 import IntersectObserver from '@/components/common/IntersectObserver';
 import { RouteGuard } from '@/components/common/RouteGuard';
 import { ScrollToTop } from '@/components/common/ScrollToTop';
@@ -12,34 +12,34 @@ import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/contexts/AuthContext';
 import routes from './routes';
 
-// ✅ executa antes do Supabase/AuthProvider montar (evita AbortError)
-function preHandleOAuthCode() {
-  try {
+function OAuthBridge() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     const code = searchParams.get('code');
 
-    // Se voltou do Google como "/?code=...#/login" ou "/?code=..."
-    // e ainda não está em "#/auth/callback", reescreve tudo
-    if (code && !window.location.hash.includes('/auth/callback')) {
-      const newUrl = `${window.location.origin}${window.location.pathname}#/auth/callback?code=${encodeURIComponent(code)}`;
-      window.location.replace(newUrl);
-      return true; // interrompe render
-    }
+    // Se já estamos no callback, não mexe
+    const hash = window.location.hash || '';
+    const alreadyOnCallback = hash.startsWith('#/auth/callback');
 
-    return false;
-  } catch {
-    return false;
-  }
+    if (code && !alreadyOnCallback) {
+      // Reescreve URL para o HashRouter entender
+      const newUrl = `${window.location.origin}${window.location.pathname}#/auth/callback?code=${encodeURIComponent(code)}`;
+      window.history.replaceState({}, '', newUrl);
+
+      navigate('/auth/callback', { replace: true });
+    }
+  }, [navigate]);
+
+  return null;
 }
 
-const App: React.FC = () => {
-  // ✅ se tiver code, já redirecionou e não renderiza nada agora
-  if (typeof window !== 'undefined' && preHandleOAuthCode()) {
-    return null;
-  }
-
+const AppInner: React.FC = () => {
   return (
-    <Router>
+    <>
+      <OAuthBridge />
+
       <AuthProvider>
         <StatePersistence>
           <RouteGuard>
@@ -65,6 +65,14 @@ const App: React.FC = () => {
           </RouteGuard>
         </StatePersistence>
       </AuthProvider>
+    </>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <Router>
+      <AppInner />
     </Router>
   );
 };
