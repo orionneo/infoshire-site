@@ -2,56 +2,57 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/db/supabase';
 
-function getCodeFromUrl(): string | null {
-  // caso normal: /auth/callback?code=...
-  const url = new URL(window.location.href);
-  const codeFromSearch = url.searchParams.get('code');
-  if (codeFromSearch) return codeFromSearch;
-
-  // caso HashRouter: /#/auth/callback?code=...
-  const hash = window.location.hash || '';
-  const qIndex = hash.indexOf('?');
-  if (qIndex >= 0) {
-    const qs = hash.slice(qIndex + 1);
-    const p = new URLSearchParams(qs);
-    return p.get('code');
-  }
-
-  return null;
-}
-
 export default function AuthCallback() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    async function run() {
       try {
-        const code = getCodeFromUrl();
+        // Supabase retorna ?code=... no callback (PKCE)
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get('code');
+
         if (!code) {
           navigate('/login', { replace: true });
           return;
         }
 
-        // ✅ IMPORTANTE: o exchangeCodeForSession recebe o CODE (string), não a URL
-        const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) {
-          console.error('exchangeCodeForSession error:', error);
-          navigate('/login', { replace: true });
+        const { data, error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+        if (error) throw error;
+
+        // limpa ?code=... pra não dar loop
+        url.searchParams.delete('code');
+        window.history.replaceState({}, document.title, url.toString());
+
+        if (cancelled) return;
+
+        // Se já temos session, manda pro portal
+        if (data?.session?.user) {
+          navigate('/client', { replace: true });
           return;
         }
 
-        // Com sessão criada, manda pro destino padrão
-        navigate('/client', { replace: true });
+        navigate('/login', { replace: true });
       } catch (e) {
         console.error('AuthCallback error:', e);
         navigate('/login', { replace: true });
       }
-    })();
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
   }, [navigate]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="text-sm opacity-80">Finalizando login...</div>
+    <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div>
+        <h2 style={{ fontSize: 18, fontWeight: 700 }}>Concluindo login…</h2>
+        <p>Se essa tela não sair em alguns segundos, volte e tente novamente.</p>
+      </div>
     </div>
   );
 }
