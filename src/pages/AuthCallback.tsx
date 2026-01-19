@@ -6,53 +6,42 @@ export default function AuthCallback() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
+    const run = async () => {
       try {
-        // Supabase retorna ?code=... no callback (PKCE)
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get('code');
+        // Quando vier via "ponte", a URL será:
+        // https://.../infoshire-site/#/auth/callback?code=XXXX
+        // então o code está dentro do hash após "?"
+        const hash = window.location.hash || '';
+        const query = hash.includes('?') ? hash.split('?')[1] : '';
+        const code = new URLSearchParams(query).get('code');
 
         if (!code) {
+          // sem code -> manda pro login
           navigate('/login', { replace: true });
           return;
         }
 
-        const { data, error } = await supabase.auth.exchangeCodeForSession(window.location.href);
-        if (error) throw error;
-
-        // limpa ?code=... pra não dar loop
-        url.searchParams.delete('code');
-        window.history.replaceState({}, document.title, url.toString());
-
-        if (cancelled) return;
-
-        // Se já temos session, manda pro portal
-        if (data?.session?.user) {
-          navigate('/client', { replace: true });
+        const { error } = await supabase.auth.exchangeCodeForSession(code);
+        if (error) {
+          console.error('exchangeCodeForSession error:', error);
+          navigate('/login', { replace: true });
           return;
         }
 
-        navigate('/login', { replace: true });
+        // sucesso -> entra
+        navigate('/client', { replace: true });
       } catch (e) {
         console.error('AuthCallback error:', e);
         navigate('/login', { replace: true });
       }
-    }
+    };
 
     run();
-    return () => {
-      cancelled = true;
-    };
   }, [navigate]);
 
   return (
-    <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div>
-        <h2 style={{ fontSize: 18, fontWeight: 700 }}>Concluindo login…</h2>
-        <p>Se essa tela não sair em alguns segundos, volte e tente novamente.</p>
-      </div>
+    <div className="min-h-screen flex items-center justify-center">
+      <div>Finalizando login...</div>
     </div>
   );
 }
