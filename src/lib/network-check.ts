@@ -13,6 +13,9 @@ export function isOnline(): boolean {
 
 /**
  * Verifica a conectividade com o Supabase
+ * ✅ NÃO usa tabela (profiles), porque RLS/permissão pode causar falso "offline"
+ * ✅ Usa ping leve: supabase.auth.getSession()
+ * ✅ Tem timeout pra não ficar preso no "verificando conexão..."
  */
 export async function checkSupabaseConnection(): Promise<{
   success: boolean;
@@ -26,48 +29,53 @@ export async function checkSupabaseConnection(): Promise<{
     };
   }
 
+  const startTime = performance.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+
   try {
-    const startTime = performance.now();
-    
-    // Tenta fazer uma query simples para verificar a conexão
-    const { error } = await supabase
-      .from('profiles')
-      .select('id')
-      .limit(1);
+    // "Ping" leve e confiável (não depende de RLS/tabelas)
+    await Promise.race([
+      supabase.auth.getSession(),
+      new Promise((_, reject) => {
+        controller.signal.addEventListener('abort', () => reject(new Error('timeout')));
+      }),
+    ]);
 
-    const endTime = performance.now();
-    const latency = Math.round(endTime - startTime);
-
-    if (error) {
-      console.error('❌ Erro ao conectar com Supabase:', error);
-      return {
-        success: false,
-        message: `Erro de conexão: ${error.message}`,
-        latency,
-      };
-    }
+    const latency = Math.round(performance.now() - startTime);
 
     return {
       success: true,
       message: 'Conexão estabelecida com sucesso',
       latency,
     };
-  } catch (err) {
-    console.error('❌ Erro inesperado ao verificar conexão:', err);
+  } catch (err: any) {
+    const latency = Math.round(performance.now() - startTime);
+
+    // Timeout / erro de fetch / etc.
+    const msg =
+      err?.message === 'timeout'
+        ? 'Timeout ao conectar no servidor'
+        : err instanceof Error
+          ? err.message
+          : 'Erro desconhecido';
+
+    console.error('❌ Erro ao conectar com Supabase:', err);
+
     return {
       success: false,
-      message: err instanceof Error ? err.message : 'Erro desconhecido',
+      message: msg,
+      latency,
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
 /**
  * Monitora mudanças no status da conexão
  */
-export function setupNetworkMonitoring(
-  onOnline?: () => void,
-  onOffline?: () => void
-): () => void {
+export function setupNetworkMonitoring(onOnline?: () => void, onOffline?: () => void): () => void {
   const handleOnline = () => {
     console.log('✅ Conexão restaurada');
     onOnline?.();
@@ -91,11 +99,7 @@ export function setupNetworkMonitoring(
 /**
  * Retry automático para requisições que falharam
  */
-export async function retryRequest<T>(
-  requestFn: () => Promise<T>,
-  maxRetries = 3,
-  delayMs = 1000
-): Promise<T> {
+export async function retryRequest<T>(requestFn: () => Promise<T>, maxRetries = 3, delayMs = 1000): Promise<T> {
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -103,10 +107,10 @@ export async function retryRequest<T>(
       return await requestFn();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error('Erro desconhecido');
-      
+
       if (attempt < maxRetries) {
-        console.warn(`⚠️ Tentativa ${attempt} falhou, tentando novamente em ${delayMs}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+        console.warn(`⚠️ Tentativa ${attempt} falhou, tentando novamente em ${delayMs * attempt}ms...`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs * attempt));
       }
     }
   }

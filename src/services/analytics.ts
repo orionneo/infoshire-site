@@ -1,40 +1,62 @@
+// src/lib/analytics.ts
 import { supabase } from '@/db/supabase';
+
+// ============================================
+// HELPERS
+// ============================================
+
+function safeUUID(): string {
+  try {
+    // browsers modernos
+    return crypto.randomUUID();
+  } catch {
+    // fallback simples
+    return `uuid_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+function isConflictError(err: any): boolean {
+  // PostgrestError costuma vir com .code (23505) ou status 409 no fetch
+  const code = err?.code;
+  const msg = String(err?.message || '').toLowerCase();
+  const details = String(err?.details || '').toLowerCase();
+
+  return (
+    code === '23505' ||
+    msg.includes('duplicate') ||
+    msg.includes('conflict') ||
+    details.includes('duplicate') ||
+    details.includes('conflict')
+  );
+}
 
 // ============================================
 // VISITOR & SESSION MANAGEMENT
 // ============================================
 
-/**
- * Obter ou criar ID único do visitante (armazenado em localStorage)
- * Não contém PII, apenas UUID aleatório
- */
 export function getOrCreateVisitorId(): string {
   const VISITOR_KEY = 'analytics_visitor_id';
-  
+
   let visitorId = localStorage.getItem(VISITOR_KEY);
-  
+
   if (!visitorId) {
-    visitorId = crypto.randomUUID();
+    visitorId = safeUUID();
     localStorage.setItem(VISITOR_KEY, visitorId);
   }
-  
+
   return visitorId;
 }
 
-/**
- * Obter ou criar ID da sessão (armazenado em sessionStorage)
- * Nova sessão a cada vez que o navegador é fechado/aberto
- */
 export function getSessionId(): string {
   const SESSION_KEY = 'analytics_session_id';
-  
+
   let sessionId = sessionStorage.getItem(SESSION_KEY);
-  
+
   if (!sessionId) {
-    sessionId = crypto.randomUUID();
+    sessionId = safeUUID();
     sessionStorage.setItem(SESSION_KEY, sessionId);
   }
-  
+
   return sessionId;
 }
 
@@ -42,15 +64,11 @@ export function getSessionId(): string {
 // TRAFFIC SOURCE DETECTION
 // ============================================
 
-/**
- * Detectar origem do tráfego baseado em referrer e UTM
- */
 export function detectTrafficSource(): string {
   const urlParams = new URLSearchParams(window.location.search);
   const utmSource = urlParams.get('utm_source')?.toLowerCase();
-  const referrer = document.referrer.toLowerCase();
+  const referrer = (document.referrer || '').toLowerCase();
 
-  // Verificar UTM source primeiro
   if (utmSource) {
     if (utmSource.includes('google')) return 'google';
     if (utmSource.includes('instagram') || utmSource.includes('ig')) return 'instagram';
@@ -59,29 +77,24 @@ export function detectTrafficSource(): string {
     return 'other';
   }
 
-  // Verificar referrer
-  if (!referrer || referrer === '') return 'direct';
-  
-  if (referrer.includes('google.com') || referrer.includes('google.com.br')) return 'google';
+  if (!referrer) return 'direct';
+
+  if (referrer.includes('google.com')) return 'google';
   if (referrer.includes('instagram.com')) return 'instagram';
   if (referrer.includes('facebook.com') || referrer.includes('fb.com')) return 'facebook';
   if (referrer.includes('whatsapp.com') || referrer.includes('wa.me')) return 'whatsapp';
   if (referrer.includes('t.co') || referrer.includes('twitter.com')) return 'twitter';
   if (referrer.includes('linkedin.com')) return 'linkedin';
-  
-  // Se vier de outro domínio
+
   const currentDomain = window.location.hostname;
   if (!referrer.includes(currentDomain)) return 'other';
-  
+
   return 'direct';
 }
 
-/**
- * Extrair parâmetros UTM da URL
- */
 export function getUtmParams() {
   const urlParams = new URLSearchParams(window.location.search);
-  
+
   return {
     utm_source: urlParams.get('utm_source') || null,
     utm_medium: urlParams.get('utm_medium') || null,
@@ -89,61 +102,62 @@ export function getUtmParams() {
   };
 }
 
-/**
- * Detectar se é bot baseado em user agent
- */
 export function isBot(): boolean {
   const userAgent = navigator.userAgent.toLowerCase();
   const botPatterns = [
-    'bot', 'crawler', 'spider', 'scraper', 'curl', 'wget',
-    'googlebot', 'bingbot', 'slurp', 'duckduckbot', 'baiduspider',
-    'yandexbot', 'facebookexternalhit', 'whatsapp', 'telegram'
+    'bot',
+    'crawler',
+    'spider',
+    'scraper',
+    'curl',
+    'wget',
+    'googlebot',
+    'bingbot',
+    'slurp',
+    'duckduckbot',
+    'baiduspider',
+    'yandexbot',
+    'facebookexternalhit',
+    'telegram',
   ];
-  
-  return botPatterns.some(pattern => userAgent.includes(pattern));
+
+  return botPatterns.some((pattern) => userAgent.includes(pattern));
 }
 
-/**
- * Detectar tipo de dispositivo
- */
 export function getDeviceType(): string {
   const userAgent = navigator.userAgent.toLowerCase();
-  
-  if (/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i.test(userAgent)) {
-    return 'tablet';
-  }
-  if (/Mobile|Android|iP(hone|od)|IEMobile|BlackBerry|Kindle|Silk-Accelerated|(hpw|web)OS|Opera M(obi|ini)/.test(userAgent)) {
+
+  if (/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i.test(userAgent)) return 'tablet';
+  if (/Mobile|Android|iP(hone|od)|IEMobile|BlackBerry|Kindle|Silk-Accelerated|(hpw|web)OS|Opera M(obi|ini)/.test(userAgent))
     return 'mobile';
-  }
+
   return 'desktop';
 }
 
-/**
- * Obter nome do navegador
- */
 export function getBrowser(): string {
   const userAgent = navigator.userAgent;
-  
+
   if (userAgent.includes('Firefox')) return 'Firefox';
   if (userAgent.includes('Chrome') && !userAgent.includes('Edg')) return 'Chrome';
   if (userAgent.includes('Safari') && !userAgent.includes('Chrome')) return 'Safari';
   if (userAgent.includes('Edg')) return 'Edge';
   if (userAgent.includes('Opera') || userAgent.includes('OPR')) return 'Opera';
-  
+
   return 'Other';
 }
 
 /**
- * Obter geolocalização do visitante via IP
- * Usa API gratuita ip-api.com (45 requisições/minuto)
+ * Geolocalização via IP (com timeout, para não travar o app)
  */
 export async function getGeolocation(): Promise<{ city: string | null; country: string | null }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1800);
+
   try {
     const response = await fetch('https://ipapi.co/json/', {
       method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -158,8 +172,11 @@ export async function getGeolocation(): Promise<{ city: string | null; country: 
       country: data.country_name || null,
     };
   } catch (error) {
+    // timeout/offline/etc.
     console.error('[ANALYTICS] Erro ao buscar geolocalização:', error);
     return { city: null, country: null };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -169,18 +186,12 @@ export async function getGeolocation(): Promise<{ city: string | null; country: 
 
 let sessionStartTime: number | null = null;
 let lastActivityTime: number | null = null;
-let durationUpdateInterval: NodeJS.Timeout | null = null;
+let durationUpdateInterval: any | null = null;
 
-/**
- * Iniciar rastreamento de sessão
- */
 export async function trackSessionStart(): Promise<boolean> {
   try {
-    // Verificar se já iniciou sessão
     const SESSION_STARTED_KEY = 'analytics_session_started';
-    if (sessionStorage.getItem(SESSION_STARTED_KEY) === 'true') {
-      return true; // Já iniciado
-    }
+    if (sessionStorage.getItem(SESSION_STARTED_KEY) === 'true') return true;
 
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
@@ -190,58 +201,51 @@ export async function trackSessionStart(): Promise<boolean> {
     const browser = getBrowser();
     const isBotUser = isBot();
 
-    // Obter geolocalização (cidade e país)
+    // Geolocalização NÃO pode travar o fluxo
     const location = await getGeolocation();
 
-    // Inserir sessão
-    const { error: sessionError } = await supabase
-      .from('analytics_sessions')
-      .insert({
-        session_id: sessionId,
-        visitor_id: visitorId,
-        first_visit: new Date().toISOString(),
-        last_activity: new Date().toISOString(),
-        page_count: 1,
-        duration_seconds: 0,
-        is_bot: isBotUser,
-        device_type: deviceType,
-        browser: browser,
-        city: location.city,
-        country: location.country,
-        referrer: document.referrer || null,
-        user_agent: navigator.userAgent,
-        page_entry: window.location.pathname,
-      });
+    // 1) Inserir sessão (se der conflito, consideramos OK)
+    const { error: sessionError } = await supabase.from('analytics_sessions').insert({
+      session_id: sessionId,
+      visitor_id: visitorId,
+      first_visit: new Date().toISOString(),
+      last_activity: new Date().toISOString(),
+      page_count: 1,
+      duration_seconds: 0,
+      is_bot: isBotUser,
+      device_type: deviceType,
+      browser,
+      city: location.city,
+      country: location.country,
+      referrer: document.referrer || null,
+      user_agent: navigator.userAgent,
+      page_entry: window.location.pathname,
+    });
 
-    if (sessionError) {
+    if (sessionError && !isConflictError(sessionError)) {
       console.error('[ANALYTICS] Erro ao inserir sessão:', sessionError);
-      return false;
+      // não derruba app
     }
 
-    // Inserir origem de tráfego
-    const { error: sourceError } = await supabase
-      .from('analytics_sources')
-      .insert({
-        session_id: sessionId,
-        source_type: sourceType,
-        utm_source: utmParams.utm_source,
-        utm_medium: utmParams.utm_medium,
-        utm_campaign: utmParams.utm_campaign,
-        referrer: document.referrer || null,
-      });
+    // 2) Inserir origem (erro aqui também não derruba)
+    const { error: sourceError } = await supabase.from('analytics_sources').insert({
+      session_id: sessionId,
+      source_type: sourceType,
+      utm_source: utmParams.utm_source,
+      utm_medium: utmParams.utm_medium,
+      utm_campaign: utmParams.utm_campaign,
+      referrer: document.referrer || null,
+    });
 
-    if (sourceError) {
+    if (sourceError && !isConflictError(sourceError)) {
       console.error('[ANALYTICS] Erro ao inserir origem:', sourceError);
     }
 
-    // Marcar sessão como iniciada
     sessionStorage.setItem(SESSION_STARTED_KEY, 'true');
     sessionStartTime = Date.now();
     lastActivityTime = Date.now();
 
-    // Iniciar heartbeat para atualizar duração
     startDurationHeartbeat();
-
     return true;
   } catch (error) {
     console.error('[ANALYTICS] Erro ao iniciar sessão:', error);
@@ -249,28 +253,17 @@ export async function trackSessionStart(): Promise<boolean> {
   }
 }
 
-/**
- * Iniciar heartbeat para atualizar duração da sessão
- */
 function startDurationHeartbeat() {
-  // Limpar interval anterior se existir
-  if (durationUpdateInterval) {
-    clearInterval(durationUpdateInterval);
-  }
+  if (durationUpdateInterval) clearInterval(durationUpdateInterval);
 
-  // Atualizar duração a cada 5 segundos quando aba está visível
   durationUpdateInterval = setInterval(() => {
-    if (document.visibilityState === 'visible') {
-      updateSessionDuration();
-    }
+    if (document.visibilityState === 'visible') updateSessionDuration();
   }, 5000);
 
-  // Atualizar ao sair da página
   window.addEventListener('beforeunload', () => {
     updateSessionDuration();
   });
 
-  // Atualizar quando aba fica visível novamente
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       lastActivityTime = Date.now();
@@ -280,25 +273,26 @@ function startDurationHeartbeat() {
   });
 }
 
-/**
- * Atualizar duração da sessão
- */
 async function updateSessionDuration() {
-  if (!sessionStartTime || !lastActivityTime) return;
+  try {
+    if (!sessionStartTime || !lastActivityTime) return;
 
-  const sessionId = getSessionId();
-  const durationSeconds = Math.floor((Date.now() - sessionStartTime) / 1000);
+    const sessionId = getSessionId();
+    const durationSeconds = Math.floor((Date.now() - sessionStartTime) / 1000);
 
-  const { error } = await supabase
-    .from('analytics_sessions')
-    .update({
-      duration_seconds: durationSeconds,
-      last_activity: new Date().toISOString(),
-    })
-    .eq('session_id', sessionId);
+    const { error } = await supabase
+      .from('analytics_sessions')
+      .update({
+        duration_seconds: durationSeconds,
+        last_activity: new Date().toISOString(),
+      })
+      .eq('session_id', sessionId);
 
-  if (error) {
-    console.error('[ANALYTICS] Erro ao atualizar duração:', error);
+    if (error && !isConflictError(error)) {
+      console.error('[ANALYTICS] Erro ao atualizar duração:', error);
+    }
+  } catch (e) {
+    console.error('[ANALYTICS] Erro ao atualizar duração (catch):', e);
   }
 }
 
@@ -308,49 +302,55 @@ async function updateSessionDuration() {
 
 const trackedPages = new Set<string>();
 
-/**
- * Rastrear visualização de página
- */
 export async function trackPageView(path: string, title: string): Promise<boolean> {
   try {
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
 
-    // Evitar duplicação na mesma sessão
     const pageKey = `${sessionId}-${path}`;
-    if (trackedPages.has(pageKey)) {
-      return true; // Já rastreado
-    }
+    if (trackedPages.has(pageKey)) return true;
 
+    // Upsert pra evitar 409 (conflito/duplicado)
     const { error } = await supabase
       .from('analytics_pageviews')
-      .insert({
-        session_id: sessionId,
-        visitor_id: visitorId,
-        page_path: path,
-        page_title: title,
-        time_on_page: 0,
-      });
+      .upsert(
+        {
+          // Se sua tabela tiver "id" uuid, ótimo. Se não tiver, remove este campo.
+          id: safeUUID(),
+          session_id: sessionId,
+          visitor_id: visitorId,
+          page_path: path,
+          page_title: title,
+          time_on_page: 0,
+        },
+        {
+          onConflict: 'session_id,page_path',
+          ignoreDuplicates: true,
+        }
+      );
 
     if (error) {
-      console.error('[ANALYTICS] Erro ao rastrear pageview:', error);
-      return false;
+      // conflito = ok
+      if (!isConflictError(error)) {
+        console.error('[ANALYTICS] Erro ao rastrear pageview:', error);
+        return false;
+      }
     }
 
     trackedPages.add(pageKey);
 
-    // Atualizar contagem de páginas na sessão
+    // Increment page_count (se existir RPC). Se falhar, não derruba app.
     const { error: updateError } = await supabase.rpc('increment_page_count', {
       p_session_id: sessionId,
     });
 
-    if (updateError) {
+    if (updateError && !isConflictError(updateError)) {
       console.error('[ANALYTICS] Erro ao incrementar page_count:', updateError);
     }
 
     return true;
   } catch (error) {
-    console.error('[ANALYTICS] Erro ao rastrear pageview:', error);
+    console.error('[ANALYTICS] Erro ao rastrear pageview (catch):', error);
     return false;
   }
 }
@@ -361,35 +361,23 @@ export async function trackPageView(path: string, title: string): Promise<boolea
 
 const trackedEvents = new Set<string>();
 
-/**
- * Rastrear evento (clique em botão de contato, etc)
- */
-export async function trackEvent(
-  eventType: string,
-  eventLabel?: string,
-  pagePath?: string
-): Promise<boolean> {
+export async function trackEvent(eventType: string, eventLabel?: string, pagePath?: string): Promise<boolean> {
   try {
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
 
-    // Evitar duplicação de eventos na mesma sessão
     const eventKey = `${sessionId}-${eventType}-${eventLabel || ''}`;
-    if (trackedEvents.has(eventKey)) {
-      return true; // Já rastreado
-    }
+    if (trackedEvents.has(eventKey)) return true;
 
-    const { error } = await supabase
-      .from('analytics_events')
-      .insert({
-        session_id: sessionId,
-        visitor_id: visitorId,
-        event_type: eventType,
-        event_label: eventLabel || null,
-        page_path: pagePath || window.location.pathname,
-      });
+    const { error } = await supabase.from('analytics_events').insert({
+      session_id: sessionId,
+      visitor_id: visitorId,
+      event_type: eventType,
+      event_label: eventLabel || null,
+      page_path: pagePath || window.location.pathname,
+    });
 
-    if (error) {
+    if (error && !isConflictError(error)) {
       console.error('[ANALYTICS] Erro ao rastrear evento:', error);
       return false;
     }
@@ -397,20 +385,14 @@ export async function trackEvent(
     trackedEvents.add(eventKey);
     return true;
   } catch (error) {
-    console.error('[ANALYTICS] Erro ao rastrear evento:', error);
+    console.error('[ANALYTICS] Erro ao rastrear evento (catch):', error);
     return false;
   }
 }
 
-/**
- * Configurar rastreamento automático de cliques em links de contato
- */
 export function setupClickTracking() {
-  // Event delegation para capturar cliques em qualquer elemento
   document.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
-    
-    // Verificar se é link, botão ou elemento clicável
     const clickable = target.closest('a, button, [role="button"], [onclick]');
     if (!clickable) return;
 
@@ -419,61 +401,33 @@ export function setupClickTracking() {
     const textContent = clickable.textContent?.toLowerCase() || '';
     const ariaLabel = clickable.getAttribute('aria-label')?.toLowerCase() || '';
     const title = clickable.getAttribute('title')?.toLowerCase() || '';
-    
-    // Combinar todos os textos para detecção
+
     const allText = `${textContent} ${ariaLabel} ${title}`.toLowerCase();
 
-    // Rastrear cliques em WhatsApp
     if (
-      href.includes('wa.me') || 
-      href.includes('whatsapp') || 
+      href.includes('wa.me') ||
+      href.includes('whatsapp') ||
       href.includes('api.whatsapp.com') ||
       dataEvent === 'whatsapp_click' ||
       allText.includes('whatsapp') ||
       allText.includes('zap')
     ) {
       trackEvent('whatsapp_click', 'WhatsApp Contact');
-    }
-    // Rastrear cliques em telefone
-    else if (
-      href.startsWith('tel:') || 
-      dataEvent === 'phone_click' ||
-      allText.includes('ligar') ||
-      allText.includes('telefone') ||
-      allText.includes('phone')
-    ) {
+    } else if (href.startsWith('tel:') || dataEvent === 'phone_click' || allText.includes('ligar') || allText.includes('telefone') || allText.includes('phone')) {
       trackEvent('phone_click', 'Phone Contact');
-    }
-    // Rastrear cliques em email
-    else if (
-      href.startsWith('mailto:') || 
-      dataEvent === 'email_click' ||
-      allText.includes('email') ||
-      allText.includes('e-mail')
-    ) {
+    } else if (href.startsWith('mailto:') || dataEvent === 'email_click' || allText.includes('email') || allText.includes('e-mail')) {
       trackEvent('email_click', 'Email Contact');
-    }
-    // Rastrear cliques em Instagram
-    else if (
-      href.includes('instagram.com') || 
+    } else if (
+      href.includes('instagram.com') ||
       href.includes('instagr.am') ||
       dataEvent === 'instagram_click' ||
       allText.includes('instagram') ||
       allText.includes('insta')
     ) {
       trackEvent('instagram_click', 'Instagram Profile');
-    }
-    // Rastrear cliques em Facebook
-    else if (
-      href.includes('facebook.com') || 
-      href.includes('fb.com') ||
-      dataEvent === 'facebook_click' ||
-      allText.includes('facebook')
-    ) {
+    } else if (href.includes('facebook.com') || href.includes('fb.com') || dataEvent === 'facebook_click' || allText.includes('facebook')) {
       trackEvent('facebook_click', 'Facebook Profile');
-    }
-    // Rastrear cliques em orçamento/agendamento
-    else if (
+    } else if (
       dataEvent === 'budget_click' ||
       allText.includes('orçamento') ||
       allText.includes('orcamento') ||
@@ -484,9 +438,7 @@ export function setupClickTracking() {
       allText.includes('quote')
     ) {
       trackEvent('budget_click', 'Budget Request');
-    }
-    // Rastrear cliques em login/área do cliente
-    else if (
+    } else if (
       href.includes('/login') ||
       href.includes('/client') ||
       allText.includes('login') ||
