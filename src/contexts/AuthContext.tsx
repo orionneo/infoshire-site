@@ -28,12 +28,15 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function buildRedirectTo(): string {
   const base = import.meta.env.BASE_URL || '/';
-  const useHash = base !== '/'; // GitHub Pages repo => hash
+  const isGitHubPagesRepo = base !== '/';
 
-  // ✅ GitHub Pages QA: https://orionneo.github.io/infoshire-site/#/auth/callback
-  // ✅ Prod domínio:     https://www.infoshire.com.br/auth/callback
-  const callback = useHash ? '#/auth/callback' : 'auth/callback';
-  return `${window.location.origin}${base}${callback}`;
+  // ✅ GH Pages precisa SEMPRE voltar para /infoshire-site/#/auth/callback
+  if (isGitHubPagesRepo) {
+    return `${window.location.origin}${base}#/auth/callback`;
+  }
+
+  // ✅ Produção (domínio) pode ser rota normal
+  return `${window.location.origin}/auth/callback`;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -114,27 +117,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signInWithGoogle = async () => {
-    try {
-      const redirectTo = buildRedirectTo();
+const signInWithGoogle = async () => {
+  try {
+    const redirectTo = buildRedirectTo();
 
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          },
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
         },
-      });
+      },
+    });
 
-      if (error) throw error;
-      return { error: null };
-    } catch (error) {
-      return { error: error as Error };
-    }
-  };
+    if (error) throw error;
+    return { error: null };
+  } catch (error) {
+    return { error: error as Error };
+  }
+};
 
   const signOut = async () => {
     await supabase.auth.signOut();
