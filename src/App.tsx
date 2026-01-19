@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Navigate, Route, HashRouter as Router, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Route, HashRouter as Router, Routes } from 'react-router-dom';
 import IntersectObserver from '@/components/common/IntersectObserver';
 import { RouteGuard } from '@/components/common/RouteGuard';
 import { ScrollToTop } from '@/components/common/ScrollToTop';
@@ -13,33 +13,25 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import routes from './routes';
 
 function OAuthBridge() {
-  const navigate = useNavigate();
-
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     const code = searchParams.get('code');
 
-    // Se já estamos no callback, não mexe
-    const hash = window.location.hash || '';
-    const alreadyOnCallback = hash.startsWith('#/auth/callback');
+    if (!code) return;
 
-    if (code && !alreadyOnCallback) {
-      // Reescreve URL para o HashRouter entender
-      const newUrl = `${window.location.origin}${window.location.pathname}#/auth/callback?code=${encodeURIComponent(code)}`;
-      window.history.replaceState({}, '', newUrl);
+    const base = import.meta.env.BASE_URL || '/';
+    const target = `${window.location.origin}${base}#/auth/callback?code=${encodeURIComponent(code)}`;
 
-      navigate('/auth/callback', { replace: true });
-    }
-  }, [navigate]);
+    // remove ?code=... e joga pra rota do hash
+    window.history.replaceState({}, '', target);
+  }, []);
 
   return null;
 }
 
-const AppInner: React.FC = () => {
+const App: React.FC = () => {
   return (
-    <>
-      <OAuthBridge />
-
+    <Router>
       <AuthProvider>
         <StatePersistence>
           <RouteGuard>
@@ -47,6 +39,9 @@ const AppInner: React.FC = () => {
             <IntersectObserver />
             <AnalyticsTracker />
             <GlobalGamerBackground />
+
+            {/* ✅ Corrige retorno OAuth (?code=...) para HashRouter */}
+            <OAuthBridge />
 
             <div className="flex flex-col min-h-screen relative z-10">
               <main className="flex-grow">
@@ -65,14 +60,6 @@ const AppInner: React.FC = () => {
           </RouteGuard>
         </StatePersistence>
       </AuthProvider>
-    </>
-  );
-};
-
-const App: React.FC = () => {
-  return (
-    <Router>
-      <AppInner />
     </Router>
   );
 };
