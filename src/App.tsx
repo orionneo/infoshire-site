@@ -14,15 +14,16 @@ import routes from './routes';
 
 function OAuthBridge() {
   useEffect(() => {
-    const searchParams = new URLSearchParams(window.location.search);
-    const code = searchParams.get('code');
+    // Google volta pro GH Pages como:
+    // https://orionneo.github.io/infoshire-site/?code=XXXX#/login
+    // A gente reescreve para:
+    // https://orionneo.github.io/infoshire-site/#/auth/callback?code=XXXX
 
+    const code = new URLSearchParams(window.location.search).get('code');
     if (!code) return;
 
     const base = import.meta.env.BASE_URL || '/';
     const target = `${window.location.origin}${base}#/auth/callback?code=${encodeURIComponent(code)}`;
-
-    // remove ?code=... e joga pra rota do hash
     window.history.replaceState({}, '', target);
   }, []);
 
@@ -40,7 +41,6 @@ const App: React.FC = () => {
             <AnalyticsTracker />
             <GlobalGamerBackground />
 
-            {/* ✅ Corrige retorno OAuth (?code=...) para HashRouter */}
             <OAuthBridge />
 
             <div className="flex flex-col min-h-screen relative z-10">
