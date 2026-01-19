@@ -1,81 +1,150 @@
 /**
  * Utilitário para verificar conectividade de rede e status do Supabase
+ * - Não depende de tabela "profiles" (pode falhar por RLS e dar falso "offline")
+ * - Trata 401/403 como "conectado" (apenas sem permissão)
+ * - Faz cache curto para evitar floods
  */
 
 import { supabase } from '@/db/supabase';
 
-/**
- * Verifica se há conexão com a internet
- */
-export function isOnline(): boolean {
-  return navigator.onLine;
-}
-
-/**
- * Verifica a conectividade com o Supabase
- * ✅ NÃO usa tabela (profiles), porque RLS/permissão pode causar falso "offline"
- * ✅ Usa ping leve: supabase.auth.getSession()
- * ✅ Tem timeout pra não ficar preso no "verificando conexão..."
- */
-export async function checkSupabaseConnection(): Promise<{
+type CheckResult = {
   success: boolean;
   message: string;
   latency?: number;
-}> {
+};
+
+let lastCheckAt = 0;
+let lastResult: CheckResult | null = null;
+
+// Ajuste fino: evita rodar check toda hora
+const CACHE_MS = 12_000; // 12s
+
+export function isOnline(): boolean {
+  return typeof navigator !== 'undefined' ? navigator.onLine : true;
+}
+
+/**
+ * Heurística para decidir se um erro parece ser "rede" vs "permissão".
+ */
+function isLikelyNetworkError(err: any): boolean {
+  const msg = String(err?.message || err || '').toLowerCase();
+  return (
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('load failed') ||
+    msg.includes('fetch') ||
+    msg.includes('timeout') ||
+    msg.includes('net::') ||
+    msg.includes('dns') ||
+    msg.includes('cors')
+  );
+}
+
+/**
+ * Check de conectividade com Supabase.
+ * Estratégia:
+ * 1) Se offline => falha
+ * 2) auth.getSession() => ping leve (não depende de RLS)
+ * 3) select leve em uma tabela que existe no seu schema (site_settings ou system_settings)
+ *    - Se der 401/403 => considerar conectado (RLS bloqueou, mas Supabase respondeu)
+ */
+export async function checkSupabaseConnection(): Promise<CheckResult> {
   if (!isOnline()) {
-    return {
-      success: false,
-      message: 'Sem conexão com a internet',
-    };
+    return { success: false, message: 'Sem conexão com a internet' };
+  }
+
+  const now = Date.now();
+  if (lastResult && now - lastCheckAt < CACHE_MS) {
+    return lastResult;
   }
 
   const startTime = performance.now();
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2500);
 
   try {
-    // "Ping" leve e confiável (não depende de RLS/tabelas)
-    await Promise.race([
-      supabase.auth.getSession(),
-      new Promise((_, reject) => {
-        controller.signal.addEventListener('abort', () => reject(new Error('timeout')));
-      }),
-    ]);
+    // 1) Ping leve via auth (não exige acesso a tabelas)
+    await supabase.auth.getSession();
 
-    const latency = Math.round(performance.now() - startTime);
+    // 2) Ping leve no banco (tabela "site_settings" ou "system_settings")
+    //    Escolhi "system_settings" pois você listou ela como existente.
+    //    Se você preferir "site_settings", pode trocar abaixo.
+    const { error } = await supabase
+      .from('system_settings')
+      .select('id')
+      .limit(1);
 
-    return {
+    const endTime = performance.now();
+    const latency = Math.round(endTime - startTime);
+
+    if (error) {
+      // Se for erro de permissão, é sinal de que o backend respondeu => conexão OK
+      // Supabase normalmente retorna code como '42501' (insufficient_privilege) ou status 401/403 no REST.
+      const status = (error as any)?.status;
+      const code = (error as any)?.code;
+
+      if (status === 401 || status === 403 || code === '42501') {
+        const result = {
+          success: true,
+          message: 'Conectado (acesso restrito por permissão)',
+          latency,
+        };
+        lastCheckAt = now;
+        lastResult = result;
+        return result;
+      }
+
+      const result = {
+        success: false,
+        message: `Erro ao consultar Supabase: ${error.message}`,
+        latency,
+      };
+      lastCheckAt = now;
+      lastResult = result;
+      return result;
+    }
+
+    const result = {
       success: true,
       message: 'Conexão estabelecida com sucesso',
       latency,
     };
+    lastCheckAt = now;
+    lastResult = result;
+    return result;
   } catch (err: any) {
-    const latency = Math.round(performance.now() - startTime);
+    const endTime = performance.now();
+    const latency = Math.round(endTime - startTime);
 
-    // Timeout / erro de fetch / etc.
-    const msg =
-      err?.message === 'timeout'
-        ? 'Timeout ao conectar no servidor'
-        : err instanceof Error
-          ? err.message
-          : 'Erro desconhecido';
+    // Se parece rede, marcar como falha de conexão
+    if (isLikelyNetworkError(err)) {
+      const result = {
+        success: false,
+        message: 'Falha de rede ao acessar o servidor',
+        latency,
+      };
+      lastCheckAt = now;
+      lastResult = result;
+      return result;
+    }
 
-    console.error('❌ Erro ao conectar com Supabase:', err);
-
-    return {
+    // Caso genérico
+    const result = {
       success: false,
-      message: msg,
+      message: err instanceof Error ? err.message : 'Erro desconhecido',
       latency,
     };
-  } finally {
-    clearTimeout(timeout);
+    lastCheckAt = now;
+    lastResult = result;
+    return result;
   }
 }
 
 /**
  * Monitora mudanças no status da conexão
  */
-export function setupNetworkMonitoring(onOnline?: () => void, onOffline?: () => void): () => void {
+export function setupNetworkMonitoring(
+  onOnline?: () => void,
+  onOffline?: () => void
+): () => void {
   const handleOnline = () => {
     console.log('✅ Conexão restaurada');
     onOnline?.();
@@ -89,7 +158,6 @@ export function setupNetworkMonitoring(onOnline?: () => void, onOffline?: () => 
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
 
-  // Retorna função de cleanup
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);
@@ -99,7 +167,11 @@ export function setupNetworkMonitoring(onOnline?: () => void, onOffline?: () => 
 /**
  * Retry automático para requisições que falharam
  */
-export async function retryRequest<T>(requestFn: () => Promise<T>, maxRetries = 3, delayMs = 1000): Promise<T> {
+export async function retryRequest<T>(
+  requestFn: () => Promise<T>,
+  maxRetries = 3,
+  delayMs = 1000
+): Promise<T> {
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
