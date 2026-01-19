@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate, Route, Routes, HashRouter } from 'react-router-dom';
+import { Navigate, Route, HashRouter as Router, Routes } from 'react-router-dom';
 import IntersectObserver from '@/components/common/IntersectObserver';
 import { RouteGuard } from '@/components/common/RouteGuard';
 import { ScrollToTop } from '@/components/common/ScrollToTop';
@@ -14,9 +14,7 @@ import routes from './routes';
 
 const App: React.FC = () => {
   return (
-    // ✅ GH Pages: HashRouter é o caminho mais seguro
-    // ✅ basename precisa ser o BASE_URL do Vite (ex.: "/infoshire-site/")
-    <HashRouter basename={import.meta.env.BASE_URL}>
+    <Router>
       <AuthProvider>
         <StatePersistence>
           <RouteGuard>
@@ -42,7 +40,7 @@ const App: React.FC = () => {
           </RouteGuard>
         </StatePersistence>
       </AuthProvider>
-    </HashRouter>
+    </Router>
   );
 };
 
