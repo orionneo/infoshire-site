@@ -2,23 +2,29 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/db/supabase';
 
+function getOAuthCodeFromUrl() {
+  // 1) code no search (antes do #) -> /?code=XXX#/login
+  const searchParams = new URLSearchParams(window.location.search);
+  const codeFromSearch = searchParams.get('code');
+  if (codeFromSearch) return codeFromSearch;
+
+  // 2) code no hash -> #/auth/callback?code=XXX
+  const hash = window.location.hash || '';
+  const queryString = hash.includes('?') ? hash.split('?')[1] : '';
+  const hashParams = new URLSearchParams(queryString);
+  const codeFromHash = hashParams.get('code');
+  if (codeFromHash) return codeFromHash;
+
+  return null;
+}
+
 export default function AuthCallback() {
   const navigate = useNavigate();
 
   useEffect(() => {
     const run = async () => {
       try {
-        // ✅ 1) tenta pegar code do hash: "#/auth/callback?code=XXXX"
-        const hash = window.location.hash || '';
-        const hashQuery = hash.includes('?') ? hash.split('?')[1] : '';
-        const hashParams = new URLSearchParams(hashQuery);
-        const codeFromHash = hashParams.get('code');
-
-        // ✅ 2) fallback: pega code do search: "?code=XXXX"
-        const searchParams = new URLSearchParams(window.location.search);
-        const codeFromSearch = searchParams.get('code');
-
-        const code = codeFromHash || codeFromSearch;
+        const code = getOAuthCodeFromUrl();
 
         if (!code) {
           navigate('/login', { replace: true });
@@ -26,21 +32,20 @@ export default function AuthCallback() {
         }
 
         const { error } = await supabase.auth.exchangeCodeForSession(code);
-
         if (error) {
-          console.error('exchangeCodeForSession error:', error);
+          console.error('[AuthCallback] exchangeCodeForSession error:', error);
           navigate('/login', { replace: true });
           return;
         }
 
-        // ✅ limpa o ?code=... pra não reprocessar
-        const cleanUrl = `${window.location.origin}${window.location.pathname}#/client`;
+        // ✅ Limpa o ?code= do search pra não reprocessar ao recarregar
+        const cleanUrl = `${window.location.origin}${window.location.pathname}#${window.location.hash.split('?')[0] || '/'}`
+          .replace('##', '#');
         window.history.replaceState({}, '', cleanUrl);
 
-        // sucesso
         navigate('/client', { replace: true });
       } catch (e) {
-        console.error('AuthCallback error:', e);
+        console.error('[AuthCallback] error:', e);
         navigate('/login', { replace: true });
       }
     };
