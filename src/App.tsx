@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Navigate, Route, HashRouter as Router, Routes } from 'react-router-dom';
 import IntersectObserver from '@/components/common/IntersectObserver';
 import { RouteGuard } from '@/components/common/RouteGuard';
@@ -12,24 +12,6 @@ import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/contexts/AuthContext';
 import routes from './routes';
 
-function OAuthBridge() {
-  useEffect(() => {
-    // Google volta pro GH Pages como:
-    // https://orionneo.github.io/infoshire-site/?code=XXXX#/login
-    // A gente reescreve para:
-    // https://orionneo.github.io/infoshire-site/#/auth/callback?code=XXXX
-
-    const code = new URLSearchParams(window.location.search).get('code');
-    if (!code) return;
-
-    const base = import.meta.env.BASE_URL || '/';
-    const target = `${window.location.origin}${base}#/auth/callback?code=${encodeURIComponent(code)}`;
-    window.history.replaceState({}, '', target);
-  }, []);
-
-  return null;
-}
-
 const App: React.FC = () => {
   return (
     <Router>
@@ -40,8 +22,6 @@ const App: React.FC = () => {
             <IntersectObserver />
             <AnalyticsTracker />
             <GlobalGamerBackground />
-
-            <OAuthBridge />
 
             <div className="flex flex-col min-h-screen relative z-10">
               <main className="flex-grow">
