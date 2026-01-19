@@ -6,18 +6,51 @@ export default function AuthCallback() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const run = async () => {
-      const { data } = await supabase.auth.getSession();
+    let finished = false;
 
-      if (data.session) {
-        navigate('/client', { replace: true });
-      } else {
-        navigate('/login', { replace: true });
+    const go = (to: string) => {
+      if (finished) return;
+      finished = true;
+      navigate(to, { replace: true });
+    };
+
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        if (session?.user) {
+          go('/client');
+        }
       }
+    );
+
+    const run = async () => {
+      for (let i = 0; i < 25; i++) {
+        const { data, error } = await supabase.auth.getSession();
+
+        if (data?.session?.user) {
+          go('/client');
+          return;
+        }
+
+        if (error) {
+          console.warn('AuthCallback getSession error', error);
+        }
+
+        await new Promise((r) => setTimeout(r, 150));
+      }
+
+      go('/login');
     };
 
     run();
+
+    return () => {
+      sub.subscription.unsubscribe();
+    };
   }, [navigate]);
 
-  return null;
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" />
+    </div>
+  );
 }

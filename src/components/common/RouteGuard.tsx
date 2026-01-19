@@ -6,38 +6,29 @@ interface RouteGuardProps {
   children: React.ReactNode;
 }
 
-// Pages that can be accessed without logging in
 const PUBLIC_ROUTES = [
-  '/', // home
   '/login',
   '/register',
   '/forgot-password',
   '/change-password',
-  '/reset-password/*',
-  '/auth/callback', // ✅ IMPORTANT: OAuth finalization route must be public
+  '/reset-password',
   '/403',
   '/404',
+  '/',
   '/services',
   '/about',
   '/contact',
   '/init-admin',
-  '/approve/*',
+  '/approve',
   '/rastrear-os',
+
+  // ✅ OAuth callback NUNCA deve ser guardado
+  '/auth/callback',
 ];
 
-function escapeRegExp(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function matchPublicRoute(path: string, patterns: string[]) {
-  return patterns.some((pattern) => {
-    if (pattern.includes('*')) {
-      // convert "/reset-password/*" -> "^/reset-password/.*$"
-      const [prefix] = pattern.split('*');
-      const regex = new RegExp('^' + escapeRegExp(prefix) + '.*$');
-      return regex.test(path);
-    }
-    return path === pattern;
+function isPublic(path: string) {
+  return PUBLIC_ROUTES.some((route) => {
+    return path === route || path.startsWith(route + '/');
   });
 }
 
@@ -47,15 +38,17 @@ export function RouteGuard({ children }: RouteGuardProps) {
   const location = useLocation();
 
   useEffect(() => {
-    // ✅ Don't redirect while auth is still initializing
+    // ⚠️ nunca interfere no callback
+    if (location.pathname.startsWith('/auth/callback')) {
+      return;
+    }
+
     if (loading) return;
 
-    const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
-
-    if (!user && !isPublic) {
-      navigate('/login', { state: { from: location.pathname }, replace: true });
+    if (!user && !isPublic(location.pathname)) {
+      navigate('/login', { replace: true });
     }
-  }, [user, loading, location.pathname, navigate, location]);
+  }, [user, loading, location.pathname, navigate]);
 
   if (loading) {
     return (
