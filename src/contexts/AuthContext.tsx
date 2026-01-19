@@ -4,18 +4,19 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '@/db/supabase';
 import type { Profile } from '@/types/types';
 
+/** Lê o profile */
 export async function getProfile(userId: string): Promise<Profile | null> {
   const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
   if (error) {
     console.error('Falha ao buscar profile:', error);
     return null;
   }
-  return data as Profile | null;
+  return (data as Profile) ?? null;
 }
 
 /**
  * Garante que exista um profile para o user autenticado.
- * - id do profile = auth.user.id (chave única e sem conflito)
+ * - id do profile = auth.user.id
  * - cria/atualiza name/email do metadata
  * - salva phone se vier do metadata (cadastro normal)
  * - NÃO sobrescreve phone se já existe no banco
@@ -39,7 +40,7 @@ async function ensureProfile(user: User): Promise<Profile | null> {
         email: user.email ?? null,
         name: nameFromMeta ?? null,
         phone: phoneFromMeta ?? null,
-        role: ('client' as any),
+        role: 'client' as any,
       };
 
       const { data, error } = await supabase
@@ -58,8 +59,6 @@ async function ensureProfile(user: User): Promise<Profile | null> {
     // Se existe, atualiza somente campos “seguros”
     const shouldUpdateName = (!existing.name || existing.name.trim() === '') && !!nameFromMeta;
     const shouldUpdateEmail = (!existing.email || existing.email.trim() === '') && !!user.email;
-
-    // Se não tem phone no banco e veio do metadata (cadastro por email/telefone), salva.
     const shouldUpdatePhone = (!existing.phone || String(existing.phone).trim() === '') && !!phoneFromMeta;
 
     if (shouldUpdateName || shouldUpdateEmail || shouldUpdatePhone) {
@@ -103,13 +102,48 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-function needsPhone(p: Profile | null) {
+function profileNeedsPhone(p: Profile | null) {
   const phone = (p?.phone ?? '').toString().trim();
   return phone.length === 0;
 }
 
 // Rotas onde NÃO devemos forçar redirect pro complete-profile
-const PHONE_EXEMPT_ROUTES = ['/login', '/register', '/auth/callback', '/complete-profile', '/forgot-password', '/reset-password', '/change-password'];
+const PHONE_EXEMPT_ROUTES = [
+  '/login',
+  '/register',
+  '/auth/callback',
+  '/complete-profile',
+  '/forgot-password',
+  '/reset-password',
+  '/change-password',
+];
+
+/** Pega o code do OAuth tanto do search quanto do hash */
+function getOAuthCodeFromUrl(): string | null {
+  // Ex: /infoshire-site/?code=XXX#/login
+  const sp = new URLSearchParams(window.location.search);
+  const codeFromSearch = sp.get('code');
+  if (codeFromSearch) return codeFromSearch;
+
+  // Ex: /infoshire-site/#/auth/callback?code=XXX
+  const hash = window.location.hash || '';
+  const qs = hash.includes('?') ? hash.split('?')[1] : '';
+  const hp = new URLSearchParams(qs);
+  const codeFromHash = hp.get('code');
+  if (codeFromHash) return codeFromHash;
+
+  return null;
+}
+
+/** Remove o ?code= da URL pra evitar loop */
+function cleanOAuthCodeFromUrl() {
+  try {
+    // Mantém o hash atual
+    const hash = window.location.hash || '#/';
+    const clean = `${window.location.origin}${window.location.pathname}${hash}`;
+    window.history.replaceState({}, '', clean);
+  } catch {}
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -128,38 +162,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(p);
   };
 
-  // ✅ Forçar telefone (sempre que já existir sessão e profile sem phone)
+  /**
+   * ✅ FORÇA TELEFONE:
+   * Depois de logado e com profile carregado, se não for admin e não tiver phone, manda pro complete-profile,
+   * exceto em rotas liberadas.
+   */
   useEffect(() => {
     if (!loading && user && profile) {
       const path = location.pathname;
       const isExempt = PHONE_EXEMPT_ROUTES.includes(path);
 
-      if (!isExempt && profile.role !== 'admin' && needsPhone(profile)) {
+      if (!isExempt && profile.role !== 'admin' && profileNeedsPhone(profile)) {
         navigate('/complete-profile', { replace: true });
       }
     }
   }, [loading, user, profile, location.pathname, navigate]);
 
+  /**
+   * ✅ INIT:
+   * Se voltar do Google com ?code=..., processa aqui ANTES de qualquer redirect.
+   */
   useEffect(() => {
     let mounted = true;
 
     const init = async () => {
-      const { data } = await supabase.auth.getSession();
-      const sessionUser = data.session?.user ?? null;
+      try {
+        // 1) Se tem code na URL, troca por sessão agora (evita loop/tela preta)
+        const code = getOAuthCodeFromUrl();
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) console.error('exchangeCodeForSession (init) error:', error);
+          cleanOAuthCodeFromUrl();
+        }
 
-      if (!mounted) return;
+        // 2) Agora pega sessão normal
+        const { data } = await supabase.auth.getSession();
+        const sessionUser = data.session?.user ?? null;
 
-      setUser(sessionUser);
-
-      if (sessionUser) {
-        const p = await ensureProfile(sessionUser);
         if (!mounted) return;
-        setProfile(p);
-      } else {
-        setProfile(null);
-      }
 
-      setLoading(false);
+        setUser(sessionUser);
+
+        if (sessionUser) {
+          const p = await ensureProfile(sessionUser);
+          if (!mounted) return;
+          setProfile(p);
+        } else {
+          setProfile(null);
+        }
+      } catch (e) {
+        console.error('AuthProvider init error:', e);
+      } finally {
+        if (mounted) setLoading(false);
+      }
     };
 
     init();
@@ -228,26 +283,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
-  try {
-    const isGithubPages = window.location.hostname.endsWith('github.io');
-    const basePath = isGithubPages ? '/infoshire-site' : '';
+    try {
+      const isGithubPages = window.location.hostname.endsWith('github.io');
+      const basePath = isGithubPages ? '/infoshire-site' : '';
 
-    const redirectTo = `${window.location.origin}${basePath}/#/auth/callback`;
+      // Mesmo que o Supabase ignore e volte com ?code=...#/login,
+      // nosso INIT vai capturar e trocar a sessão.
+      const redirectTo = `${window.location.origin}${basePath}/#/auth/callback`;
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo,
-        queryParams: { access_type: 'offline', prompt: 'consent' },
-      },
-    });
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          queryParams: { access_type: 'offline', prompt: 'consent' },
+        },
+      });
 
-    if (error) throw error;
-    return { error: null };
-  } catch (error) {
-    return { error: error as Error };
-  }
-};
+      if (error) throw error;
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
+  };
 
   const signOut = async () => {
     await supabase.auth.signOut();

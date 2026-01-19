@@ -22,7 +22,7 @@ const PUBLIC_ROUTES = [
   '/approve/*',
   '/rastrear-os',
   '/auth/callback',
-  '/complete-profile', // ✅ permitir a tela de completar telefone
+  '/complete-profile',
 ];
 
 function matchPublicRoute(path: string, patterns: string[]) {
@@ -33,11 +33,6 @@ function matchPublicRoute(path: string, patterns: string[]) {
     }
     return path === pattern;
   });
-}
-
-function hasValidPhone(phone?: string | null) {
-  const digits = (phone || '').replace(/\D/g, '');
-  return digits.length >= 10; // 10 ou 11 normalmente
 }
 
 export function RouteGuard({ children }: RouteGuardProps) {
@@ -56,21 +51,10 @@ export function RouteGuard({ children }: RouteGuardProps) {
       return;
     }
 
-    // 2) Com user, mas sem profile carregado ainda: não redireciona aqui (evita loop)
-    // (AuthContext resolve o profile)
+    // 2) Com user, mas sem profile carregado ainda: não redireciona (evita loop)
     if (user && !profile) return;
 
-    // 3) Com user e profile, força completar telefone para áreas protegidas
-    if (
-      user &&
-      profile &&
-      !hasValidPhone(profile.phone) &&
-      !isPublic &&
-      location.pathname !== '/complete-profile'
-    ) {
-      navigate('/complete-profile', { replace: true });
-      return;
-    }
+    // ✅ Phone redirect fica no AuthContext (evita lógica duplicada/loop)
   }, [user, profile, loading, location.pathname, navigate]);
 
   if (loading) {
