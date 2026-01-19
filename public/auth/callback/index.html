@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Auth callback</title>
+  </head>
+  <body>
+    <script>
+      // Preserve ?code=... and send it into the hash route
+      // so the SPA can finish the OAuth session.
+      var base = "/infoshire-site/";
+      var search = window.location.search || ""; // ?code=...
+      window.location.replace(base + "#/auth/callback" + search);
+    </script>
+  </body>
+</html>
