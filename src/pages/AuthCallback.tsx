@@ -11,9 +11,10 @@ export default function AuthCallback() {
         // Quando vier via "ponte", a URL será:
         // https://.../infoshire-site/#/auth/callback?code=XXXX
         // então o code está dentro do hash após "?"
-        const hash = window.location.hash || '';
-        const query = hash.includes('?') ? hash.split('?')[1] : '';
-        const code = new URLSearchParams(query).get('code');
+const hash = window.location.hash;
+const queryString = hash.split('?')[1] || '';
+const params = new URLSearchParams(queryString);
+const code = params.get('code');
 
         if (!code) {
           // sem code -> manda pro login
