@@ -30,16 +30,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
+      # Seu projeto NÃO usa "npm run build" (ele só dá echo).
+      # O build real roda dentro do "lint" (chama .rules/testBuild.sh).
+      - name: Build (project uses lint as build)
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        run: npm run build
+        run: npm run lint
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          # No seu repo existe dev-dist/ (e não dist/)
+          path: dev-dist
 
   deploy:
     runs-on: ubuntu-latest
