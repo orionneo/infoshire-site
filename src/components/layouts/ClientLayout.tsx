@@ -1,24 +1,23 @@
-import { Home, LogOut, Menu, Package, User, Wrench } from 'lucide-react';
-import React from 'react';
+import { LogOut, Menu, Package, User, Wrench } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { useAuth } from '@/contexts/AuthContext';
+import { useMemo } from 'react';
 
 export function ClientLayout({ children }: { children: React.ReactNode }) {
-  const { profile, signOut } = useAuth();
+  const { user, profile, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
+  const needsPhone = useMemo(() => {
+    const digits = String(profile?.phone || '').replace(/\D/g, '');
+    return !!user && (!digits || digits.length < 10);
+  }, [user, profile?.phone]);
+
   const handleSignOut = async () => {
     await signOut();
-    navigate('/login', { replace: true });
-  };
-
-  const handleBackToSite = () => {
-    // HashRouter: voltar para home publica
-    navigate('/', { replace: false });
+    navigate('/');
   };
 
   const navItems = [
@@ -37,6 +36,17 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
 
       <div className="flex-1 py-6">
         <nav className="space-y-2 px-3">
+          {/* NOVO: Completar Cadastro (se faltar phone) */}
+          {needsPhone && (
+            <Button
+              variant="outline"
+              className="w-full justify-start neon-hover"
+              onClick={() => navigate('/complete-profile')}
+            >
+              Completar Cadastro
+            </Button>
+          )}
+
           {navItems.map((item) => {
             const Icon = item.icon;
             return (
@@ -57,20 +67,12 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
         </nav>
       </div>
 
-      <div className="border-t p-4 space-y-3">
-        <div className="px-3">
+      <div className="border-t p-4">
+        <div className="mb-4 px-3">
           <p className="text-sm font-medium">{profile?.name || 'Cliente'}</p>
-          <p className="text-xs text-muted-foreground break-all">{profile?.email}</p>
+          <p className="text-xs text-muted-foreground">{profile?.email}</p>
         </div>
-
-        {/* Voltar ao site */}
-        <Button variant="outline" className="w-full" onClick={handleBackToSite}>
-          <Home className="h-4 w-4 mr-2" />
-          Voltar ao site
-        </Button>
-
-        {/* Sair */}
-        <Button variant="destructive" className="w-full" onClick={handleSignOut}>
+        <Button variant="outline" className="w-full" onClick={handleSignOut}>
           <LogOut className="h-4 w-4 mr-2" />
           Sair
         </Button>
@@ -96,27 +98,18 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
               <Wrench className="h-6 w-6 text-primary" />
               <span className="font-bold text-xl">InfoShire</span>
             </div>
-
-            <div className="flex items-center gap-2">
-              {/* Voltar ao site (mobile) */}
-              <Button variant="outline" size="sm" onClick={handleBackToSite}>
-                <Home className="h-4 w-4 mr-2" />
-                Site
-              </Button>
-
-              <Sheet>
-                <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon">
-                    <Menu className="h-6 w-6" />
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="left" className="w-64 p-0">
-                  <div className="flex flex-col h-full">
-                    <SidebarContent />
-                  </div>
-                </SheetContent>
-              </Sheet>
-            </div>
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <Menu className="h-6 w-6" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="w-64 p-0">
+                <div className="flex flex-col h-full">
+                  <SidebarContent />
+                </div>
+              </SheetContent>
+            </Sheet>
           </div>
         </header>
 
