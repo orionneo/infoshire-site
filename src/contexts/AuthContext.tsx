@@ -46,6 +46,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get('code');
+
+    if (code) {
+      supabase.auth.exchangeCodeForSession(window.location.href).then(({ error }) => {
+        if (error) console.error('exchangeCodeForSession error:', error);
+
+        // limpa o ?code=... da URL (evita loops)
+        url.searchParams.delete('code');
+        window.history.replaceState({}, document.title, url.toString());
+      });
+    }
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) {

@@ -1,5 +1,5 @@
 import { ArrowLeft, Loader2, Wrench } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -10,11 +10,23 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 
 export default function Login() {
-  const { signInWithUsername, signInWithGoogle } = useAuth();
+  const { signInWithUsername, signInWithGoogle, user, profile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+    // ✅ Se já estiver autenticado, não deixa ficar na tela de login
+  useEffect(() => {
+    if (!user) return;
+
+    if (profile?.role === 'admin') {
+      navigate('/admin', { replace: true });
+      return;
+    }
+
+    navigate('/client', { replace: true });
+  }, [user, profile, navigate]);
+
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const form = useForm({
@@ -51,7 +63,7 @@ export default function Login() {
       }
 
       // Check if user needs to change password (default password 123456)
-      if (data.password === '123456') {
+      if (data.password === 'info123') {
         toast({
           title: 'Altere sua senha',
           description: 'Por segurança, você precisa alterar sua senha padrão',
