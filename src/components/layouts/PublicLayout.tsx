@@ -24,6 +24,13 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
     navigate('/');
   };
 
+  function firstName(full?: string | null) {
+  const s = (full || '').trim();
+  if (!s) return 'Cliente';
+  return s.split(' ')[0];
+}
+
+
   const navLinks = [
     { to: '/', label: 'Início', icon: Home },
     { to: '/services', label: 'Serviços', icon: Briefcase },
@@ -195,15 +202,15 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
             {user ? (
               <>
                 {/* User Panel/Orders Button */}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="neon-hover h-9 w-9"
-                  onClick={() => navigate(profile?.role === 'admin' ? '/admin' : '/client')}
-                  title={profile?.role === 'admin' ? 'Meu Painel' : 'Minhas Ordens'}
-                >
-                  <Shield className="h-5 w-5" />
-                </Button>
+<Button
+  variant="outline"
+  size="sm"
+  className="neon-hover"
+  onClick={() => navigate(profile?.role === 'admin' ? '/admin' : '/client')}
+  title="Abrir meu painel"
+>
+  {profile?.name ? `Olá, ${profile.name.split(' ')[0]}` : 'Minha Conta'}
+</Button>
               </>
             ) : (
               <>

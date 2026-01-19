@@ -21,7 +21,8 @@ const PUBLIC_ROUTES = [
   '/init-admin',
   '/approve/*',
   '/rastrear-os',
-  '/auth/callback', // ✅ importantíssimo
+  '/auth/callback',
+  '/complete-profile', // ✅ permitir a tela de completar telefone
 ];
 
 function matchPublicRoute(path: string, patterns: string[]) {
@@ -34,8 +35,13 @@ function matchPublicRoute(path: string, patterns: string[]) {
   });
 }
 
+function hasValidPhone(phone?: string | null) {
+  const digits = (phone || '').replace(/\D/g, '');
+  return digits.length >= 10; // 10 ou 11 normalmente
+}
+
 export function RouteGuard({ children }: RouteGuardProps) {
-  const { user, loading } = useAuth();
+  const { user, loading, profile } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -44,10 +50,28 @@ export function RouteGuard({ children }: RouteGuardProps) {
 
     const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
 
+    // 1) Sem user e rota protegida => login
     if (!user && !isPublic) {
       navigate('/login', { state: { from: location.pathname }, replace: true });
+      return;
     }
-  }, [user, loading, location.pathname, navigate]);
+
+    // 2) Com user, mas sem profile carregado ainda: não redireciona aqui (evita loop)
+    // (AuthContext resolve o profile)
+    if (user && !profile) return;
+
+    // 3) Com user e profile, força completar telefone para áreas protegidas
+    if (
+      user &&
+      profile &&
+      !hasValidPhone(profile.phone) &&
+      !isPublic &&
+      location.pathname !== '/complete-profile'
+    ) {
+      navigate('/complete-profile', { replace: true });
+      return;
+    }
+  }, [user, profile, loading, location.pathname, navigate]);
 
   if (loading) {
     return (

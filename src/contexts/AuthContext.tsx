@@ -1,5 +1,5 @@
 import type { User } from '@supabase/supabase-js';
-import React, { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
+import React, { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/db/supabase';
 import type { Profile } from '@/types/types';
 
@@ -9,7 +9,81 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     console.error('Falha ao buscar profile:', error);
     return null;
   }
-  return data;
+  return (data as Profile) ?? null;
+}
+
+/**
+ * Garante que exista um profile para o user autenticado.
+ * - id do profile = auth.user.id (chave única e sem conflito)
+ * - cria/atualiza name/email do metadata
+ * - NÃO sobrescreve phone se já existe no banco
+ * - NÃO sobrescreve role se já existe no banco
+ */
+async function ensureProfile(user: User): Promise<Profile | null> {
+  try {
+    const meta = (user.user_metadata || {}) as Record<string, any>;
+
+    const nameFromMeta: string | null =
+      meta.full_name || meta.name || meta.given_name || meta.preferred_username || null;
+
+    // 1) Tenta ler
+    const existing = await getProfile(user.id);
+
+    // 2) Se não existir, cria
+    if (!existing) {
+      const payload: Partial<Profile> = {
+        id: user.id,
+        email: user.email ?? null,
+        name: nameFromMeta ?? null,
+        phone: null, // será preenchido no CompleteProfile
+        role: 'client' as any,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .upsert(payload, { onConflict: 'id' })
+        .select('*')
+        .single();
+
+      if (error) {
+        console.error('Falha ao criar profile:', error);
+        return null;
+      }
+
+      return data as Profile;
+    }
+
+    // 3) Se existe, atualiza somente campos “seguros” (não pisa no telefone nem role)
+    const shouldUpdateName = (!existing.name || existing.name.trim() === '') && !!nameFromMeta;
+    const shouldUpdateEmail = (!existing.email || existing.email.trim() === '') && !!user.email;
+
+    if (shouldUpdateName || shouldUpdateEmail) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({
+          ...(shouldUpdateName ? { name: nameFromMeta } : {}),
+          ...(shouldUpdateEmail ? { email: user.email } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id)
+        .select('*')
+        .single();
+
+      if (error) {
+        console.error('Falha ao atualizar profile (metadata):', error);
+        return existing;
+      }
+
+      return data as Profile;
+    }
+
+    return existing;
+  } catch (e) {
+    console.error('ensureProfile error:', e);
+    return null;
+  }
 }
 
 interface AuthContextType {
@@ -18,26 +92,18 @@ interface AuthContextType {
   loading: boolean;
   signInWithUsername: (username: string, password: string) => Promise<{ error: Error | null }>;
   signUpWithUsername: (username: string, password: string) => Promise<{ error: Error | null }>;
-  signUpWithEmail: (data: { name: string; phone: string; email?: string; password: string }) => Promise<{ error: Error | null }>;
+  signUpWithEmail: (data: {
+    name: string;
+    phone: string;
+    email?: string;
+    password: string;
+  }) => Promise<{ error: Error | null }>;
   signInWithGoogle: () => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-function buildRedirectTo(): string {
-  const base = import.meta.env.BASE_URL || '/';
-  const isGitHubPagesRepo = base !== '/';
-
-  // ✅ GH Pages precisa SEMPRE voltar para /infoshire-site/#/auth/callback
-  if (isGitHubPagesRepo) {
-    return `${window.location.origin}${base}#/auth/callback`;
-  }
-
-  // ✅ Produção (domínio) pode ser rota normal
-  return `${window.location.origin}/auth/callback`;
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -49,29 +115,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(null);
       return;
     }
-    const profileData = await getProfile(user.id);
-    setProfile(profileData);
+    const p = await getProfile(user.id);
+    setProfile(p);
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      if (session?.user) getProfile(session.user.id).then(setProfile);
+    let mounted = true;
+
+    const init = async () => {
+      const { data } = await supabase.auth.getSession();
+      const sessionUser = data.session?.user ?? null;
+
+      if (!mounted) return;
+
+      setUser(sessionUser);
+
+      if (sessionUser) {
+        const p = await ensureProfile(sessionUser);
+        if (!mounted) return;
+        setProfile(p);
+      } else {
+        setProfile(null);
+      }
+
       setLoading(false);
-    });
+    };
+
+    init();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        getProfile(session.user.id).then(setProfile);
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const sessionUser = session?.user ?? null;
+
+      setUser(sessionUser);
+
+      if (sessionUser) {
+        const p = await ensureProfile(sessionUser);
+        setProfile(p);
       } else {
         setProfile(null);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signInWithUsername = async (username: string, password: string) => {
@@ -117,28 +207,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-const signInWithGoogle = async () => {
-  try {
-    const redirectTo = `${window.location.origin}${import.meta.env.BASE_URL}#/auth/callback`;
+  const signInWithGoogle = async () => {
+    try {
+      // ✅ GH Pages: redirect SEM hash (callback real)
+      const redirectTo = `${window.location.origin}/infoshire-site/auth/callback`;
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          queryParams: { access_type: 'offline', prompt: 'consent' },
         },
-      },
-    });
+      });
 
-    if (error) throw error;
-    return { error: null };
-  } catch (error) {
-    return { error: error as Error };
-  }
-};
-
+      if (error) throw error;
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
+  };
 
   const signOut = async () => {
     await supabase.auth.signOut();
@@ -146,23 +233,22 @@ const signInWithGoogle = async () => {
     setProfile(null);
   };
 
-  return (
-    <AuthContext.Provider
-      value={{
-        user,
-        profile,
-        loading,
-        signInWithUsername,
-        signUpWithUsername,
-        signUpWithEmail,
-        signInWithGoogle,
-        signOut,
-        refreshProfile,
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      user,
+      profile,
+      loading,
+      signInWithUsername,
+      signUpWithUsername,
+      signUpWithEmail,
+      signInWithGoogle,
+      signOut,
+      refreshProfile,
+    }),
+    [user, profile, loading]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

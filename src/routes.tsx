@@ -34,6 +34,7 @@ import ResetPassword from './pages/ResetPassword';
 import Services from './pages/Services';
 import TrackOrder from './pages/TrackOrder';
 import AuthCallback from './pages/AuthCallback';
+import CompleteProfile from './pages/CompleteProfile';
 
 interface RouteConfig {
   name: string;
@@ -74,6 +75,13 @@ const routes: RouteConfig[] = [
     path: '/login',
     element: <Login />,
   },
+
+  {
+  name: 'Complete Profile',
+  path: '/complete-profile',
+  element: <CompleteProfile />,
+},
+
     {
     name: 'Auth Callback',
     path: '/auth/callback',
