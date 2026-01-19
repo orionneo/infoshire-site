@@ -11,7 +11,7 @@ const PUBLIC_ROUTES = [
   '/register',
   '/forgot-password',
   '/change-password',
-  '/reset-password',
+  '/reset-password/*',
   '/403',
   '/404',
   '/',
@@ -19,16 +19,21 @@ const PUBLIC_ROUTES = [
   '/about',
   '/contact',
   '/init-admin',
-  '/approve',
+  '/approve/*',
   '/rastrear-os',
 
-  // ✅ OAuth callback NUNCA deve ser guardado
+  // ✅ OAuth callback precisa ser público
   '/auth/callback',
+  '/auth/callback/*',
 ];
 
-function isPublic(path: string) {
-  return PUBLIC_ROUTES.some((route) => {
-    return path === route || path.startsWith(route + '/');
+function matchPublicRoute(path: string, patterns: string[]) {
+  return patterns.some((pattern) => {
+    if (pattern.includes('*')) {
+      const regex = new RegExp('^' + pattern.replace('*', '.*') + '$');
+      return regex.test(path);
+    }
+    return path === pattern;
   });
 }
 
@@ -38,15 +43,12 @@ export function RouteGuard({ children }: RouteGuardProps) {
   const location = useLocation();
 
   useEffect(() => {
-    // ⚠️ nunca interfere no callback
-    if (location.pathname.startsWith('/auth/callback')) {
-      return;
-    }
-
     if (loading) return;
 
-    if (!user && !isPublic(location.pathname)) {
-      navigate('/login', { replace: true });
+    const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
+
+    if (!user && !isPublic) {
+      navigate('/login', { state: { from: location.pathname }, replace: true });
     }
   }, [user, loading, location.pathname, navigate]);
 

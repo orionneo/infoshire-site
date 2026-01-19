@@ -1,56 +1,31 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/db/supabase';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function AuthCallback() {
+  const { user, profile, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    let finished = false;
+    if (loading) return;
 
-    const go = (to: string) => {
-      if (finished) return;
-      finished = true;
-      navigate(to, { replace: true });
-    };
+    // ainda não tem user? manda pro login (mas sem loop agressivo)
+    if (!user) {
+      navigate('/login', { replace: true });
+      return;
+    }
 
-    const { data: sub } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        if (session?.user) {
-          go('/client');
-        }
-      }
-    );
+    if (profile?.role === 'admin') {
+      navigate('/admin', { replace: true });
+      return;
+    }
 
-    const run = async () => {
-      for (let i = 0; i < 25; i++) {
-        const { data, error } = await supabase.auth.getSession();
-
-        if (data?.session?.user) {
-          go('/client');
-          return;
-        }
-
-        if (error) {
-          console.warn('AuthCallback getSession error', error);
-        }
-
-        await new Promise((r) => setTimeout(r, 150));
-      }
-
-      go('/login');
-    };
-
-    run();
-
-    return () => {
-      sub.subscription.unsubscribe();
-    };
-  }, [navigate]);
+    navigate('/client', { replace: true });
+  }, [user, profile, loading, navigate]);
 
   return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary" />
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-sm opacity-80">Concluindo login...</div>
     </div>
   );
 }

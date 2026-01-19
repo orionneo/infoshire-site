@@ -33,6 +33,7 @@ import Register from './pages/Register';
 import ResetPassword from './pages/ResetPassword';
 import Services from './pages/Services';
 import TrackOrder from './pages/TrackOrder';
+import AuthCallback from './pages/AuthCallback';
 
 interface RouteConfig {
   name: string;
@@ -197,6 +198,7 @@ const routes: RouteConfig[] = [
     path: '/admin/warranty-search',
     element: <WarrantySearch />,
   },
+  { path: '/auth/callback', element: <AuthCallback /> },  
   {
     name: 'Warranty List',
     path: '/admin/warranty-list',

@@ -1,13 +1,17 @@
 import type { User } from '@supabase/supabase-js';
-import React, { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
+import React, { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/db/supabase';
 import type { Profile } from '@/types/types';
 
 export async function getProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', userId)
+    .maybeSingle();
 
   if (error) {
-    console.error('获取用户信息失败:', error);
+    console.error('getProfile failed:', error);
     return null;
   }
   return data;
@@ -30,9 +34,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-
-  // loading = "auth ainda inicializando ou atualizando"
   const [loading, setLoading] = useState(true);
+
+  // evita “double bootstrap” em React StrictMode
+  const bootstrapped = useRef(false);
 
   const refreshProfile = async () => {
     if (!user) {
@@ -44,88 +49,60 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    let mounted = true;
+    if (bootstrapped.current) return;
+    bootstrapped.current = true;
 
-    const bootstrap = async () => {
-      try {
-        setLoading(true);
+    // 1) Se voltou do OAuth via hash (#access_token=...), o supabase-js captura no getSession().
+    // 2) Se voltou via PKCE (?code=...), precisamos trocar por sessão.
+    const url = new URL(window.location.href);
+    const code = url.searchParams.get('code');
 
-        // ✅ Se voltou do OAuth com ?code=..., troca por session (PKCE)
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get('code');
-        if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(window.location.href);
-          if (error) console.error('exchangeCodeForSession error:', error);
+    const finalize = () => {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        setUser(session?.user ?? null);
 
-          // limpa o ?code=... da URL (evita loops)
-          url.searchParams.delete('code');
-          window.history.replaceState({}, document.title, url.toString());
-        }
-
-        // ✅ Carrega sessão atual
-        const { data } = await supabase.auth.getSession();
-        const sessionUser = data.session?.user ?? null;
-
-        if (!mounted) return;
-
-        setUser(sessionUser);
-
-        // ✅ Carrega profile (se houver usuário)
-        if (sessionUser) {
-          const prof = await getProfile(sessionUser.id);
-          if (!mounted) return;
-          setProfile(prof);
+        if (session?.user) {
+          getProfile(session.user.id).then((p) => {
+            setProfile(p);
+            setLoading(false);
+          });
         } else {
           setProfile(null);
+          setLoading(false);
         }
-      } catch (e) {
-        console.error('Auth bootstrap error:', e);
-        if (mounted) {
-          setUser(null);
-          setProfile(null);
-        }
-      } finally {
-        if (mounted) setLoading(false);
-      }
+      });
     };
 
-    bootstrap();
+    if (code) {
+      supabase.auth.exchangeCodeForSession(window.location.href).then(({ error }) => {
+        if (error) console.error('exchangeCodeForSession error:', error);
 
-    // ✅ Escuta mudanças de auth (login/logout/refresh)
+        // limpa o ?code=... (evita loop)
+        url.searchParams.delete('code');
+        window.history.replaceState({}, document.title, url.toString());
+
+        finalize();
+      });
+    } else {
+      finalize();
+    }
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      // quando o auth muda, entramos em modo loading até carregar profile
-      setLoading(true);
-
-      const sessionUser = session?.user ?? null;
-      setUser(sessionUser);
-
-      if (sessionUser) {
-        getProfile(sessionUser.id)
-          .then((prof) => {
-            if (!mounted) return;
-            setProfile(prof);
-          })
-          .catch((e) => console.error('getProfile error:', e))
-          .finally(() => {
-            if (mounted) setLoading(false);
-          });
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        getProfile(session.user.id).then(setProfile);
       } else {
         setProfile(null);
-        setLoading(false);
       }
     });
 
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-    };
+    return () => subscription.unsubscribe();
   }, []);
 
   const signInWithUsername = async (username: string, password: string) => {
     try {
-      // Check if username is an email
       const isEmail = username.includes('@');
       const email = isEmail ? username : `${username}@miaoda.com`;
 
@@ -158,7 +135,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUpWithEmail = async (data: { name: string; phone: string; email?: string; password: string }) => {
     try {
-      // Se não tiver email, gerar um baseado no telefone
       const email = data.email || `${data.phone.replace(/\D/g, '')}@temp.infoshire.com`;
 
       const { error } = await supabase.auth.signUp({
@@ -181,11 +157,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithGoogle = async () => {
     try {
+      // ✅ sempre volta para uma rota existente no seu app
+      const redirectTo = `${window.location.origin}${import.meta.env.BASE_URL}auth/callback`;
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          // ✅ nunca mandar direto pra rota protegida; manda para callback
-          redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}#/auth/callback`,
+          redirectTo,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -227,8 +205,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
-  }
+  if (context === undefined) throw new Error('useAuth must be used within an AuthProvider');
   return context;
 }
