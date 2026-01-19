@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate, Route, BrowserRouter as Router, Routes } from 'react-router-dom';
+import { Navigate, Route, HashRouter as Router, Routes } from 'react-router-dom';
 import IntersectObserver from '@/components/common/IntersectObserver';
 import { RouteGuard } from '@/components/common/RouteGuard';
 import { ScrollToTop } from '@/components/common/ScrollToTop';
@@ -14,7 +14,7 @@ import routes from './routes';
 
 const App: React.FC = () => {
   return (
-    <Router basename={import.meta.env.BASE_URL}>
+    <Router>
       <AuthProvider>
         <StatePersistence>
           <RouteGuard>
@@ -27,11 +27,7 @@ const App: React.FC = () => {
               <main className="flex-grow">
                 <Routes>
                   {routes.map((route, index) => (
-                    <Route
-                      key={index}
-                      path={route.path}
-                      element={route.element}
-                    />
+                    <Route key={index} path={route.path} element={route.element} />
                   ))}
                   <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
