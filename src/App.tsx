@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate, Route, HashRouter as Router, Routes } from 'react-router-dom';
+import { Navigate, Route, BrowserRouter, HashRouter, Routes } from 'react-router-dom';
 import IntersectObserver from '@/components/common/IntersectObserver';
 import { RouteGuard } from '@/components/common/RouteGuard';
 import { ScrollToTop } from '@/components/common/ScrollToTop';
@@ -12,16 +12,21 @@ import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/contexts/AuthContext';
 import routes from './routes';
 
+const isGitHubPages =
+  window.location.hostname === 'orionneo.github.io'; // ✅ QA
+// depois, quando for produção, cai automaticamente no BrowserRouter
+
+const Router = isGitHubPages ? HashRouter : BrowserRouter;
+
 const App: React.FC = () => {
   return (
-    <Router>
+    <Router basename={isGitHubPages ? undefined : import.meta.env.BASE_URL}>
       <AuthProvider>
         <StatePersistence>
           <RouteGuard>
             <ScrollToTop />
             <IntersectObserver />
             <AnalyticsTracker />
-            {/* Global Gamer Background - afeta TODAS as páginas */}
             <GlobalGamerBackground />
             <div className="flex flex-col min-h-screen relative z-10">
               <main className="flex-grow">
