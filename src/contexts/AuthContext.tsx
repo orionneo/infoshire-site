@@ -228,24 +228,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
-    try {
-      // GitHub Pages + HashRouter: redirect SEM hash
-      const redirectTo = `${window.location.origin}/infoshire-site/#/auth/callback`;
+  try {
+    const isGithubPages = window.location.hostname.endsWith('github.io');
+    const basePath = isGithubPages ? '/infoshire-site' : '';
 
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo,
-          queryParams: { access_type: 'offline', prompt: 'consent' },
-        },
-      });
+    const redirectTo = `${window.location.origin}${basePath}/#/auth/callback`;
 
-      if (error) throw error;
-      return { error: null };
-    } catch (error) {
-      return { error: error as Error };
-    }
-  };
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo,
+        queryParams: { access_type: 'offline', prompt: 'consent' },
+      },
+    });
+
+    if (error) throw error;
+    return { error: null };
+  } catch (error) {
+    return { error: error as Error };
+  }
+};
 
   const signOut = async () => {
     await supabase.auth.signOut();
