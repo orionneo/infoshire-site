@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Navigate, Route, HashRouter as Router, Routes, useNavigate } from 'react-router-dom';
+import React from 'react';
+import { Navigate, Route, HashRouter as Router, Routes } from 'react-router-dom';
 import IntersectObserver from '@/components/common/IntersectObserver';
 import { RouteGuard } from '@/components/common/RouteGuard';
 import { ScrollToTop } from '@/components/common/ScrollToTop';
@@ -12,28 +12,6 @@ import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/contexts/AuthContext';
 import routes from './routes';
 
-function OAuthBridge() {
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    // Se voltar do Google com "?code=..." no search (antes do hash),
-    // a gente reescreve para "#/auth/callback?code=..."
-    const searchParams = new URLSearchParams(window.location.search);
-    const code = searchParams.get('code');
-
-    if (code) {
-      // remove o search para não reprocessar
-      const newUrl = `${window.location.origin}${window.location.pathname}#/auth/callback?code=${encodeURIComponent(code)}`;
-      window.history.replaceState({}, '', newUrl);
-
-      // navega pro callback (HashRouter)
-      navigate('/auth/callback', { replace: true });
-    }
-  }, [navigate]);
-
-  return null;
-}
-
 const App: React.FC = () => {
   return (
     <Router>
@@ -44,9 +22,6 @@ const App: React.FC = () => {
             <IntersectObserver />
             <AnalyticsTracker />
             <GlobalGamerBackground />
-
-            {/* ✅ Corrige retorno OAuth que vem como /?code=...#/login */}
-            <OAuthBridge />
 
             <div className="flex flex-col min-h-screen relative z-10">
               <main className="flex-grow">
