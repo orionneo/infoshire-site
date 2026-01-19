@@ -1,0 +1,26 @@
+name: Create Supabase Users
+
+on:
+  workflow_dispatch:
+
+jobs:
+  create-users:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run create-users
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DEFAULT_PASSWORD: ${{ secrets.DEFAULT_PASSWORD }}
+        run: node scripts/create-users.js
