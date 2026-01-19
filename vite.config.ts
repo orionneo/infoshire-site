@@ -9,9 +9,21 @@ import { miaodaDevPlugin } from 'miaoda-sc-plugin';
 // Detecta quando está rodando no GitHub Actions (Pages)
 const isGH = process.env.GITHUB_ACTIONS === 'true';
 
+// Base path:
+// - Em QA (GitHub Pages): /infoshire-site/
+// - Em produção (domínio): /
+// Você pode forçar via VITE_BASE_PATH no workflow/servidor
+const basePath =
+  (process.env.VITE_BASE_PATH && process.env.VITE_BASE_PATH.trim()) ||
+  (isGH ? '/infoshire-site/' : '/');
+
+// Garantir formato correto (começa e termina com "/")
+const normalizedBase =
+  '/' + basePath.replace(/^\/+/, '').replace(/\/+$/, '') + '/';
+
 export default defineConfig({
-  // ✅ Isso é o que resolve o 404 do Pages
-  base: isGH ? '/infoshire-site/' : '/',
+  // ✅ Isso resolve paths no GitHub Pages (QA) e funciona no domínio (prod)
+  base: normalizedBase,
 
   plugins: [
     react(),
@@ -35,9 +47,9 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait',
 
-        // ✅ IMPORTANTE: alinhar com o base, senão o PWA pode quebrar no Pages
-        scope: isGH ? '/infoshire-site/' : '/',
-        start_url: isGH ? '/infoshire-site/' : '/',
+        // ✅ IMPORTANTÍSSIMO: alinhar com o base
+        scope: normalizedBase,
+        start_url: normalizedBase,
 
         icons: [
           {
