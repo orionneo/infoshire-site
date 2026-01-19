@@ -6,16 +6,17 @@ interface RouteGuardProps {
   children: React.ReactNode;
 }
 
-// Please add the pages that can be accessed without logging in to PUBLIC_ROUTES.
+// Pages that can be accessed without logging in
 const PUBLIC_ROUTES = [
+  '/', // home
   '/login',
   '/register',
   '/forgot-password',
   '/change-password',
   '/reset-password/*',
+  '/auth/callback', // ✅ IMPORTANT: OAuth finalization route must be public
   '/403',
   '/404',
-  '/',
   '/services',
   '/about',
   '/contact',
@@ -24,11 +25,16 @@ const PUBLIC_ROUTES = [
   '/rastrear-os',
 ];
 
+function escapeRegExp(s: string) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function matchPublicRoute(path: string, patterns: string[]) {
-  return patterns.some(pattern => {
+  return patterns.some((pattern) => {
     if (pattern.includes('*')) {
-      const regex = new RegExp('^' + pattern.replace('*', '.*') + '$');
+      // convert "/reset-password/*" -> "^/reset-password/.*$"
+      const [prefix] = pattern.split('*');
+      const regex = new RegExp('^' + escapeRegExp(prefix) + '.*$');
       return regex.test(path);
     }
     return path === pattern;
@@ -41,6 +47,7 @@ export function RouteGuard({ children }: RouteGuardProps) {
   const location = useLocation();
 
   useEffect(() => {
+    // ✅ Don't redirect while auth is still initializing
     if (loading) return;
 
     const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
@@ -48,7 +55,7 @@ export function RouteGuard({ children }: RouteGuardProps) {
     if (!user && !isPublic) {
       navigate('/login', { state: { from: location.pathname }, replace: true });
     }
-  }, [user, loading, location.pathname, navigate]);
+  }, [user, loading, location.pathname, navigate, location]);
 
   if (loading) {
     return (
