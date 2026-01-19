@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate, Route, BrowserRouter, HashRouter, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, HashRouter } from 'react-router-dom';
 import IntersectObserver from '@/components/common/IntersectObserver';
 import { RouteGuard } from '@/components/common/RouteGuard';
 import { ScrollToTop } from '@/components/common/ScrollToTop';
@@ -12,66 +12,37 @@ import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/contexts/AuthContext';
 import routes from './routes';
 
-const base = import.meta.env.BASE_URL || '/';
-const isGitHubPagesRepo = base !== '/'; // no seu caso: "/infoshire-site/"
-
 const App: React.FC = () => {
   return (
-    // ✅ GitHub Pages: HashRouter SEM basename (evita mismatch "/auth/callback")
-    // ✅ Produção (domínio): BrowserRouter com basename "/"
-    (isGitHubPagesRepo ? (
-      <HashRouter>
-        <AuthProvider>
-          <StatePersistence>
-            <RouteGuard>
-              <ScrollToTop />
-              <IntersectObserver />
-              <AnalyticsTracker />
-              <GlobalGamerBackground />
-              <div className="flex flex-col min-h-screen relative z-10">
-                <main className="flex-grow">
-                  <Routes>
-                    {routes.map((route, index) => (
-                      <Route key={index} path={route.path} element={route.element} />
-                    ))}
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </main>
-              </div>
-              <PWAInstallPrompt />
-              <ConnectionStatus />
-              <Toaster />
-            </RouteGuard>
-          </StatePersistence>
-        </AuthProvider>
-      </HashRouter>
-    ) : (
-      <BrowserRouter basename={base}>
-        <AuthProvider>
-          <StatePersistence>
-            <RouteGuard>
-              <ScrollToTop />
-              <IntersectObserver />
-              <AnalyticsTracker />
-              <GlobalGamerBackground />
-              <div className="flex flex-col min-h-screen relative z-10">
-                <main className="flex-grow">
-                  <Routes>
-                    {routes.map((route, index) => (
-                      <Route key={index} path={route.path} element={route.element} />
-                    ))}
-                    <Route path="*" element={<Navigate to="/" replace />} />
-                  </Routes>
-                </main>
-              </div>
-              <PWAInstallPrompt />
-              <ConnectionStatus />
-              <Toaster />
-            </RouteGuard>
-          </StatePersistence>
-        </AuthProvider>
-      </BrowserRouter>
-    ))
+    // ✅ GH Pages: HashRouter é o caminho mais seguro
+    // ✅ basename precisa ser o BASE_URL do Vite (ex.: "/infoshire-site/")
+    <HashRouter basename={import.meta.env.BASE_URL}>
+      <AuthProvider>
+        <StatePersistence>
+          <RouteGuard>
+            <ScrollToTop />
+            <IntersectObserver />
+            <AnalyticsTracker />
+            <GlobalGamerBackground />
+
+            <div className="flex flex-col min-h-screen relative z-10">
+              <main className="flex-grow">
+                <Routes>
+                  {routes.map((route, index) => (
+                    <Route key={index} path={route.path} element={route.element} />
+                  ))}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </main>
+            </div>
+
+            <PWAInstallPrompt />
+            <ConnectionStatus />
+            <Toaster />
+          </RouteGuard>
+        </StatePersistence>
+      </AuthProvider>
+    </HashRouter>
   );
 };
 
