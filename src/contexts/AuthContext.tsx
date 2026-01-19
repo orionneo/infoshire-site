@@ -1,5 +1,6 @@
 import type { User } from '@supabase/supabase-js';
 import React, { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '@/db/supabase';
 import type { Profile } from '@/types/types';
 
@@ -9,15 +10,15 @@ export async function getProfile(userId: string): Promise<Profile | null> {
     console.error('Falha ao buscar profile:', error);
     return null;
   }
-  return (data as Profile) ?? null;
+  return data as Profile | null;
 }
 
 /**
  * Garante que exista um profile para o user autenticado.
  * - id do profile = auth.user.id (chave única e sem conflito)
  * - cria/atualiza name/email do metadata
+ * - salva phone se vier do metadata (cadastro normal)
  * - NÃO sobrescreve phone se já existe no banco
- * - NÃO sobrescreve role se já existe no banco
  */
 async function ensureProfile(user: User): Promise<Profile | null> {
   try {
@@ -26,19 +27,19 @@ async function ensureProfile(user: User): Promise<Profile | null> {
     const nameFromMeta: string | null =
       meta.full_name || meta.name || meta.given_name || meta.preferred_username || null;
 
-    // 1) Tenta ler
+    const phoneFromMetaRaw: string | null = meta.phone || null;
+    const phoneFromMeta = phoneFromMetaRaw ? String(phoneFromMetaRaw).trim() : null;
+
     const existing = await getProfile(user.id);
 
-    // 2) Se não existir, cria
+    // Se não existir, cria
     if (!existing) {
       const payload: Partial<Profile> = {
         id: user.id,
         email: user.email ?? null,
         name: nameFromMeta ?? null,
-        phone: null, // será preenchido no CompleteProfile
-        role: 'client' as any,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        phone: phoneFromMeta ?? null,
+        role: ('client' as any),
       };
 
       const { data, error } = await supabase
@@ -51,20 +52,23 @@ async function ensureProfile(user: User): Promise<Profile | null> {
         console.error('Falha ao criar profile:', error);
         return null;
       }
-
       return data as Profile;
     }
 
-    // 3) Se existe, atualiza somente campos “seguros” (não pisa no telefone nem role)
+    // Se existe, atualiza somente campos “seguros”
     const shouldUpdateName = (!existing.name || existing.name.trim() === '') && !!nameFromMeta;
     const shouldUpdateEmail = (!existing.email || existing.email.trim() === '') && !!user.email;
 
-    if (shouldUpdateName || shouldUpdateEmail) {
+    // Se não tem phone no banco e veio do metadata (cadastro por email/telefone), salva.
+    const shouldUpdatePhone = (!existing.phone || String(existing.phone).trim() === '') && !!phoneFromMeta;
+
+    if (shouldUpdateName || shouldUpdateEmail || shouldUpdatePhone) {
       const { data, error } = await supabase
         .from('profiles')
         .update({
           ...(shouldUpdateName ? { name: nameFromMeta } : {}),
           ...(shouldUpdateEmail ? { email: user.email } : {}),
+          ...(shouldUpdatePhone ? { phone: phoneFromMeta } : {}),
           updated_at: new Date().toISOString(),
         })
         .eq('id', user.id)
@@ -75,7 +79,6 @@ async function ensureProfile(user: User): Promise<Profile | null> {
         console.error('Falha ao atualizar profile (metadata):', error);
         return existing;
       }
-
       return data as Profile;
     }
 
@@ -92,12 +95,7 @@ interface AuthContextType {
   loading: boolean;
   signInWithUsername: (username: string, password: string) => Promise<{ error: Error | null }>;
   signUpWithUsername: (username: string, password: string) => Promise<{ error: Error | null }>;
-  signUpWithEmail: (data: {
-    name: string;
-    phone: string;
-    email?: string;
-    password: string;
-  }) => Promise<{ error: Error | null }>;
+  signUpWithEmail: (data: { name: string; phone: string; email?: string; password: string }) => Promise<{ error: Error | null }>;
   signInWithGoogle: () => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -105,10 +103,21 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+function needsPhone(p: Profile | null) {
+  const phone = (p?.phone ?? '').toString().trim();
+  return phone.length === 0;
+}
+
+// Rotas onde NÃO devemos forçar redirect pro complete-profile
+const PHONE_EXEMPT_ROUTES = ['/login', '/register', '/auth/callback', '/complete-profile', '/forgot-password', '/reset-password', '/change-password'];
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const navigate = useNavigate();
+  const location = useLocation();
 
   const refreshProfile = async () => {
     if (!user) {
@@ -118,6 +127,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const p = await getProfile(user.id);
     setProfile(p);
   };
+
+  // ✅ Forçar telefone (sempre que já existir sessão e profile sem phone)
+  useEffect(() => {
+    if (!loading && user && profile) {
+      const path = location.pathname;
+      const isExempt = PHONE_EXEMPT_ROUTES.includes(path);
+
+      if (!isExempt && profile.role !== 'admin' && needsPhone(profile)) {
+        navigate('/complete-profile', { replace: true });
+      }
+    }
+  }, [loading, user, profile, location.pathname, navigate]);
 
   useEffect(() => {
     let mounted = true;
@@ -147,7 +168,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const sessionUser = session?.user ?? null;
-
       setUser(sessionUser);
 
       if (sessionUser) {
@@ -209,7 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signInWithGoogle = async () => {
     try {
-      // ✅ GH Pages: redirect SEM hash (callback real)
+      // GitHub Pages + HashRouter: redirect SEM hash
       const redirectTo = `${window.location.origin}/infoshire-site/auth/callback`;
 
       const { error } = await supabase.auth.signInWithOAuth({
