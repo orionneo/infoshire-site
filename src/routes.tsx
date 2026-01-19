@@ -36,6 +36,9 @@ import TrackOrder from './pages/TrackOrder';
 import AuthCallback from './pages/AuthCallback';
 import CompleteProfile from './pages/CompleteProfile';
 
+// ✅ NOVO: Layout público com header (logo/link para voltar ao site)
+import { PublicLayout } from '@/components/layouts/PublicLayout';
+
 interface RouteConfig {
   name: string;
   path: string;
@@ -70,28 +73,69 @@ const routes: RouteConfig[] = [
     path: '/rastrear-os',
     element: <TrackOrder />,
   },
+
+  // ✅ Auth routes com header/voltar ao site
   {
     name: 'Login',
     path: '/login',
-    element: <Login />,
-  },
-
-  {
-  name: 'Complete Profile',
-  path: '/complete-profile',
-  element: <CompleteProfile />,
-},
-
-    {
-    name: 'Auth Callback',
-    path: '/auth/callback',
-    element: <AuthCallback />,
+    element: (
+      <PublicLayout>
+        <Login />
+      </PublicLayout>
+    ),
   },
   {
     name: 'Register',
     path: '/register',
-    element: <Register />,
+    element: (
+      <PublicLayout>
+        <Register />
+      </PublicLayout>
+    ),
   },
+  {
+    name: 'Forgot Password',
+    path: '/forgot-password',
+    element: (
+      <PublicLayout>
+        <ForgotPassword />
+      </PublicLayout>
+    ),
+  },
+  {
+    name: 'Reset Password',
+    path: '/reset-password/:token',
+    element: (
+      <PublicLayout>
+        <ResetPassword />
+      </PublicLayout>
+    ),
+  },
+  {
+    name: 'Change Password',
+    path: '/change-password',
+    element: (
+      <PublicLayout>
+        <ChangePassword />
+      </PublicLayout>
+    ),
+  },
+  {
+    name: 'Complete Profile',
+    path: '/complete-profile',
+    element: (
+      <PublicLayout>
+        <CompleteProfile />
+      </PublicLayout>
+    ),
+  },
+
+  {
+    name: 'Auth Callback',
+    path: '/auth/callback',
+    element: <AuthCallback />,
+  },
+
   {
     name: 'Initialize Admin',
     path: '/init-admin',
@@ -102,22 +146,7 @@ const routes: RouteConfig[] = [
     path: '/approve/:token',
     element: <BudgetApproval />,
   },
-  {
-    name: 'Change Password',
-    path: '/change-password',
-    element: <ChangePassword />,
-  },
-  {
-    name: 'Forgot Password',
-    path: '/forgot-password',
-    element: <ForgotPassword />,
-  },
-  {
-    name: 'Reset Password',
-    path: '/reset-password/:token',
-    element: <ResetPassword />,
-  },
-  
+
   // Client routes
   {
     name: 'Client Dashboard',
@@ -134,7 +163,7 @@ const routes: RouteConfig[] = [
     path: '/client/profile',
     element: <ClientProfile />,
   },
-  
+
   // Admin routes
   {
     name: 'Admin Dashboard',
