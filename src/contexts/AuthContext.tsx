@@ -230,7 +230,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = async () => {
     try {
       // GitHub Pages + HashRouter: redirect SEM hash
-      const redirectTo = `${window.location.origin}/infoshire-site/auth/callback`;
+      const redirectTo = `${window.location.origin}/infoshire-site/#/auth/callback`;
 
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
