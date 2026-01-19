@@ -185,7 +185,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         provider: 'google',
         options: {
           // ✅ nunca mandar direto pra rota protegida; manda para callback
-          redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}auth/callback`,
+          redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}#/auth/callback`,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
