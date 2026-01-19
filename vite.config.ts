@@ -4,21 +4,26 @@ import svgr from 'vite-plugin-svgr';
 import { VitePWA } from 'vite-plugin-pwa';
 import path from 'path';
 
-import { miaodaDevPlugin } from "miaoda-sc-plugin";
+import { miaodaDevPlugin } from 'miaoda-sc-plugin';
 
-// https://vite.dev/config/
+// Detecta quando está rodando no GitHub Actions (Pages)
+const isGH = process.env.GITHUB_ACTIONS === 'true';
+
 export default defineConfig({
+  // ✅ Isso é o que resolve o 404 do Pages
+  base: isGH ? '/infoshire-site/' : '/',
+
   plugins: [
-    react(), 
+    react(),
     svgr({
       svgrOptions: {
-        icon: true, 
-        exportType: 'named', 
-        namedExport: 'ReactComponent', 
-      }, 
-    }), 
+        icon: true,
+        exportType: 'named',
+        namedExport: 'ReactComponent',
+      },
+    }),
     VitePWA({
-      registerType: 'autoUpdate', 
+      registerType: 'autoUpdate',
       includeAssets: ['favicon.png'],
       manifest: {
         name: 'InfoShire - Assistência Técnica',
@@ -29,8 +34,11 @@ export default defineConfig({
         background_color: '#000000',
         display: 'standalone',
         orientation: 'portrait',
-        scope: '/',
-        start_url: '/',
+
+        // ✅ IMPORTANTE: alinhar com o base, senão o PWA pode quebrar no Pages
+        scope: isGH ? '/infoshire-site/' : '/',
+        start_url: isGH ? '/infoshire-site/' : '/',
+
         icons: [
           {
             src: 'https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8slbycf711c0.png',
@@ -60,7 +68,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3 MB
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
@@ -70,13 +78,8 @@ export default defineConfig({
             handler: 'NetworkFirst',
             options: {
               cacheName: 'supabase-cache-v73',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24, // 24 hours
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
+              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
+              cacheableResponse: { statuses: [0, 200] },
             },
           },
           {
@@ -84,23 +87,17 @@ export default defineConfig({
             handler: 'NetworkFirst',
             options: {
               cacheName: 'images-cache-v73',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
+              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
             },
           },
         ],
       },
-      devOptions: {
-        enabled: true,
-      },
+      devOptions: { enabled: true },
     }),
     miaodaDevPlugin(),
   ],
+
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
