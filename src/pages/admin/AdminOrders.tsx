@@ -23,6 +23,7 @@ import { SmartInput } from '@/components/ui/SmartInput';
 import { SmartTextarea } from '@/components/ui/SmartTextarea';
 import { Textarea } from '@/components/ui/textarea';
 import { createClientProfile, createServiceOrder, getAllProfiles, getAllServiceOrders, uploadOrderImage } from '@/db/api';
+import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
 import { useToast } from '@/hooks/use-toast';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
 
@@ -139,11 +140,34 @@ export default function AdminOrders() {
         getAllServiceOrders(),
         getAllProfiles(),
       ]);
-      
+
       setOrders(ordersData);
       setClients(clientsData.filter(c => c.role === 'client'));
+
+      // ✅ cache para modo offline
+      saveAdminCache({
+        orders: ordersData,
+        clients: clientsData,
+      });
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
+
+      // ✅ fallback offline
+      const cache = loadAdminCache();
+      if (cache) {
+        setOrders(cache.orders);
+        setClients(cache.clients.filter(c => c.role === 'client'));
+        toast({
+          title: 'Modo offline',
+          description: 'Carreguei dados do cache local. Novas OS/imagens serão sincronizadas ao voltar a conexão.',
+        });
+      } else {
+        toast({
+          title: 'Sem conexão',
+          description: 'Você está offline e ainda não existe cache local neste dispositivo.',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setLoading(false);
     }

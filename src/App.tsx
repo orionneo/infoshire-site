@@ -22,28 +22,42 @@ function AppShell() {
     location.pathname.startsWith('/admin') || location.pathname.startsWith('/client');
 
   useEffect(() => {
-    const onOnline = () => {
-      console.log('🌐 Conexão restaurada, processando fila offline...');
-      processOfflineQueue();
-    };
+  const drain = () => {
+    // não bloqueia UI, só tenta sincronizar
+    void processOfflineQueue();
+  };
 
-    const onFocus = () => {
-      // ao voltar pro PWA/aba, tenta drenar fila
-      processOfflineQueue();
-    };
+  const onOnline = () => {
+    console.log('🌐 Conexão restaurada, processando fila offline...');
+    drain();
+  };
 
-    window.addEventListener('online', onOnline);
-    window.addEventListener('focus', onFocus);
+  const onFocus = () => {
+    // desktop/alguns browsers
+    drain();
+  };
 
-    // Também processa ao abrir o site
-    const t = window.setTimeout(() => processOfflineQueue(), 3000);
+  const onVisibility = () => {
+    // PWA/mobile: mais confiável que focus
+    if (document.visibilityState === 'visible') {
+      drain();
+    }
+  };
 
-    return () => {
-      window.removeEventListener('online', onOnline);
-      window.removeEventListener('focus', onFocus);
-      window.clearTimeout(t);
-    };
-  }, []);
+  window.addEventListener('online', onOnline);
+  window.addEventListener('focus', onFocus);
+  document.addEventListener('visibilitychange', onVisibility);
+
+  // Também processa ao abrir o site (leve atraso pra não competir com mount/auth)
+  const t = window.setTimeout(() => drain(), 1500);
+
+  return () => {
+    window.removeEventListener('online', onOnline);
+    window.removeEventListener('focus', onFocus);
+    document.removeEventListener('visibilitychange', onVisibility);
+    window.clearTimeout(t);
+  };
+}, []);
 
   return (
     <AuthProvider>

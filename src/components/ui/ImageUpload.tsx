@@ -3,6 +3,7 @@ import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/db/supabase';
 import { useToast } from '@/hooks/use-toast';
+import { getEquipmentPhotosBucket } from '@/db/storage';
 
 interface ImageUploadProps {
   onUploadComplete: (url: string) => void;
@@ -181,7 +182,7 @@ export function ImageUpload({ onUploadComplete, currentImageUrl, onRemove }: Ima
 
       // Upload para Supabase Storage
       const { data, error } = await supabase.storage
-        .from('app-8pj0bpgfx6v5_equipment_photos')
+        .from(getEquipmentPhotosBucket())
         .upload(sanitizedFileName, fileToUpload, {
           cacheControl: '3600',
           upsert: false,
@@ -194,7 +195,7 @@ export function ImageUpload({ onUploadComplete, currentImageUrl, onRemove }: Ima
 
       // Obter URL pública
       const { data: urlData } = supabase.storage
-        .from('app-8pj0bpgfx6v5_equipment_photos')
+        .from(getEquipmentPhotosBucket())
         .getPublicUrl(data.path);
 
       setPreview(urlData.publicUrl);

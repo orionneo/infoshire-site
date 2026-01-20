@@ -1,150 +1,115 @@
 // src/components/ConnectionStatus.tsx
-import { useEffect, useRef, useState } from 'react';
-import { AlertCircle, Wifi, WifiOff } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertCircle, WifiOff, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { checkSupabaseConnection, setupNetworkMonitoring } from '@/lib/network-check';
 
-type StatusState = {
-  checking: boolean;
-  success: boolean;
-  message: string;
-  latency?: number;
-};
+// ✅ Indicator-only: não pinga Supabase, não roda "check".
+// Mostra:
+// - Offline do navegador
+// - (Opcional) pendências na fila offline (se existir util)
+// - Botão para "tentar sincronizar" (chama processOfflineQueue, sem bloquear UI)
 
 type Props = {
   enabled?: boolean;
-  // Só mostra erro depois de X falhas seguidas (evita “intermitência visual”)
-  failThreshold?: number;
+  showPending?: boolean; // se true, tenta mostrar contador de pendências
 };
 
-export function ConnectionStatus({ enabled = true, failThreshold = 3 }: Props) {
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [connectionStatus, setConnectionStatus] = useState<StatusState>({
-    checking: true,
-    success: true,
-    message: '',
-  });
+export function ConnectionStatus({ enabled = true, showPending = true }: Props) {
+  const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
+  const [pending, setPending] = useState<number>(0);
+  const [syncing, setSyncing] = useState<boolean>(false);
 
-  const inFlight = useRef(false);
-  const failCount = useRef(0);
-  const mounted = useRef(false);
+  const timerRef = useRef<number | null>(null);
 
-  const checkConnection = async () => {
-    if (!enabled) return;
-    if (inFlight.current) return;
+  const hasIssues = useMemo(() => {
+    // só mostra se offline ou se tem pendências (opcional)
+    if (!enabled) return false;
+    if (!isOnline) return true;
+    if (showPending && pending > 0) return true;
+    return false;
+  }, [enabled, isOnline, showPending, pending]);
 
-    // Em PWA/mobile, se estiver em background, não faz check (reduz falso timeout)
-    if (document.visibilityState === 'hidden') return;
-
-    inFlight.current = true;
-
-    // Só mostra "checking" no primeiro load (evita flicker a cada recheck)
-    if (!mounted.current) {
-      setConnectionStatus((prev) => ({ ...prev, checking: true, message: '' }));
-    }
+  const refreshPendingBestEffort = async () => {
+    if (!showPending) return;
 
     try {
-      const result = await checkSupabaseConnection(9000, false);
-
-      if (result.success) {
-        failCount.current = 0;
-
-        setConnectionStatus({
-          checking: false,
-          success: true,
-          message: '',
-          latency: result.latency,
-        });
-      } else {
-        failCount.current += 1;
-
-        // Só exibe erro depois de X falhas seguidas
-        if (failCount.current >= failThreshold) {
-          setConnectionStatus({
-            checking: false,
-            success: false,
-            message: result.message,
-            latency: result.latency,
-          });
-        } else {
-          // mantém silencioso até atingir o threshold
-          setConnectionStatus((prev) => ({
-            ...prev,
-            checking: false,
-            success: true,
-            message: '',
-          }));
-        }
+      // ✅ tenta ler tamanho da fila offline, sem depender de rede.
+      // Se não existir essa função no seu projeto, ele cai no catch e fica só "offline".
+      const mod = await import('@/utils/offlineQueue');
+      if (typeof mod.getAllTasks === 'function') {
+        const tasks = await mod.getAllTasks();
+        setPending(Array.isArray(tasks) ? tasks.length : 0);
       }
-    } catch (e: any) {
-      failCount.current += 1;
+    } catch {
+      // sem fila disponível? ok, não exibe pendências
+      setPending(0);
+    }
+  };
 
-      if (failCount.current >= failThreshold) {
-        setConnectionStatus({
-          checking: false,
-          success: false,
-          message: e?.message || 'Falha ao conectar',
-        });
-      } else {
-        setConnectionStatus((prev) => ({
-          ...prev,
-          checking: false,
-          success: true,
-          message: '',
-        }));
+  const trySync = async () => {
+    // ✅ Nunca bloqueia nada: só tenta drenar fila
+    setSyncing(true);
+    try {
+      const mod = await import('@/utils/processOfflineQueue');
+      if (typeof mod.processOfflineQueue === 'function') {
+        await mod.processOfflineQueue();
       }
+    } catch (e) {
+      // indicador não precisa “gritar”; falhou = continua pendente
+      console.warn('Falha ao tentar sincronizar:', e);
     } finally {
-      mounted.current = true;
-      inFlight.current = false;
+      setSyncing(false);
+      void refreshPendingBestEffort();
     }
   };
 
   useEffect(() => {
     if (!enabled) return;
 
-    // check inicial
-    checkConnection();
-
-    // online/offline
-    const cleanup = setupNetworkMonitoring(
-      () => {
-        setIsOnline(true);
-        checkConnection();
-      },
-      () => {
-        setIsOnline(false);
-        setConnectionStatus({
-          checking: false,
-          success: false,
-          message: 'Sem conexão com a internet',
-        });
-      }
-    );
-
-    // Re-check quando volta foco/visível (sem interval, para evitar falso negativo)
-    const onFocus = () => {
-      if (navigator.onLine) checkConnection();
+    const onOnline = () => {
+      setIsOnline(true);
+      void refreshPendingBestEffort();
+      // tenta sync automaticamente ao voltar online (não bloqueia UI)
+      void trySync();
     };
+
+    const onOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+
+    // atualiza pendências ao montar + quando voltar visível
+    void refreshPendingBestEffort();
+
     const onVisibility = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) checkConnection();
+      if (document.visibilityState === 'visible') {
+        void refreshPendingBestEffort();
+        // se voltou visível e está online, tenta sync
+        if (navigator.onLine) void trySync();
+      }
     };
-
-    window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
 
-    return () => {
-      cleanup();
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, failThreshold]);
+    // opcional: checar pendências de tempos em tempos, local-only (leve)
+    timerRef.current = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshPendingBestEffort();
+    }, 30_000);
 
-  // ✅ Se desabilitado: não mostra nada
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    };
+  }, [enabled, showPending]);
+
   if (!enabled) return null;
 
-  // ✅ Se tudo OK, não mostra nada
-  if (isOnline && connectionStatus.success && !connectionStatus.checking) return null;
+  // ✅ Se não há problema, não renderiza nada
+  if (!hasIssues) return null;
 
   return (
     <div className="fixed bottom-4 right-4 z-50 max-w-md">
@@ -152,28 +117,29 @@ export function ConnectionStatus({ enabled = true, failThreshold = 3 }: Props) {
         <Alert variant="destructive" className="shadow-lg">
           <WifiOff className="h-4 w-4" />
           <AlertTitle>Sem conexão</AlertTitle>
-          <AlertDescription>Você está offline. Verifique sua internet.</AlertDescription>
-        </Alert>
-      )}
-
-      {isOnline && !connectionStatus.success && !connectionStatus.checking && (
-        <Alert variant="destructive" className="shadow-lg">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Problema de conexão</AlertTitle>
           <AlertDescription>
-            {connectionStatus.message}
-            <button onClick={checkConnection} className="mt-2 block text-sm underline hover:no-underline">
-              Tentar novamente
-            </button>
+            Você está offline. As ações continuam funcionando e serão sincronizadas quando a internet voltar.
           </AlertDescription>
         </Alert>
       )}
 
-      {connectionStatus.checking && (
+      {isOnline && showPending && pending > 0 && (
         <Alert className="shadow-lg">
-          <Wifi className="h-4 w-4 animate-pulse" />
-          <AlertTitle>Verificando…</AlertTitle>
-          <AlertDescription>Validando acesso ao servidor.</AlertDescription>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Pendências para sincronizar</AlertTitle>
+          <AlertDescription className="space-y-2">
+            <div>
+              Existem <b>{pending}</b> ação(ões) aguardando envio. O sistema sincroniza automaticamente quando possível.
+            </div>
+            <button
+              onClick={() => void trySync()}
+              disabled={syncing}
+              className="inline-flex items-center gap-2 text-sm underline hover:no-underline disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+              {syncing ? 'Sincronizando…' : 'Sincronizar agora'}
+            </button>
+          </AlertDescription>
         </Alert>
       )}
     </div>

@@ -15,8 +15,9 @@ const memoryLock = async (_key: string, _acquireTimeout: number, fn: () => Promi
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
+// ⚠️ Não derrube o build inteiro — loga e segue (você pode preferir throw em DEV)
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase env vars: VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY');
+  console.error('❌ Missing Supabase env vars: VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY');
 }
 
 // ✅ Storage “de sessão”: mantém enquanto app/aba existe; ao fechar, some (exige login)
@@ -67,7 +68,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: true,
 
     // 🔥 “fechou o PWA/aba -> reloga”
-    storage: getSessionStorageOrMemory(),
+    storage: typeof window !== 'undefined' ? getSessionStorageOrMemory() : undefined,
     storageKey: 'infoshire-auth',
 
     // ✅ Evita Navigator Locks bug / AbortError
@@ -105,14 +106,49 @@ async function safeRefreshIfNeeded() {
   }
 }
 
-// Quando volta pro app/aba, garante refresh sem “timeout”
-window.addEventListener('focus', () => {
-  void safeRefreshIfNeeded();
-});
+// ✅ Mantém sessão viva enquanto app está ABERTO e VISÍVEL (especialmente admin).
+// - Não roda quando está escondido (evita bug/timeout mobile/PWA)
+// - Ao fechar app/aba: sessionStorage some -> reloga (ok)
+let refreshTimer: number | null = null;
 
-// No PWA, visibilitychange é essencial (minimizou/voltou)
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    void safeRefreshIfNeeded();
+function startVisibleRefreshLoop() {
+  if (refreshTimer) return;
+  refreshTimer = window.setInterval(() => {
+    if (document.visibilityState === 'visible') {
+      void safeRefreshIfNeeded();
+    }
+  }, 60000); // ✅ 60s (sem numeric separator pra não quebrar esprima)
+}
+
+function stopVisibleRefreshLoop() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
   }
-});
+}
+
+function setupRefreshListeners() {
+  // Quando volta pro app/aba, garante refresh sem “timeout”
+  window.addEventListener('focus', () => {
+    void safeRefreshIfNeeded();
+  });
+
+  // No PWA, visibilitychange é essencial (minimizou/voltou)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      void safeRefreshIfNeeded();
+    }
+  });
+
+  if (document.visibilityState === 'visible') startVisibleRefreshLoop();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') startVisibleRefreshLoop();
+    else stopVisibleRefreshLoop();
+  });
+}
+
+// ✅ Só registra listeners no browser
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  setupRefreshListeners();
+}
