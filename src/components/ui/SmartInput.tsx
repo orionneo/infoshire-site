@@ -14,7 +14,7 @@ interface SmartInputProps {
   storageKey?: string;
 }
 
-// Equipamentos comuns em assistências técnicas
+// ✅ Equipamentos comuns (SEM smartphones / celulares / iPhone)
 const DEFAULT_EQUIPMENT = [
   // Computadores e Notebooks
   'Notebook',
@@ -23,13 +23,7 @@ const DEFAULT_EQUIPMENT = [
   'Chromebook',
   'MacBook',
   'iMac',
-  
-  // Dispositivos Móveis
-  'Celular/Smartphone',
-  'iPhone',
-  'Tablet',
-  'iPad',
-  
+
   // Consoles - PlayStation
   'PlayStation 5 (PS5)',
   'PlayStation 4 (PS4)',
@@ -38,14 +32,14 @@ const DEFAULT_EQUIPMENT = [
   'PlayStation 1 (PS1)',
   'PSP',
   'PS Vita',
-  
+
   // Consoles - Xbox
   'Xbox Series X',
   'Xbox Series S',
   'Xbox One',
   'Xbox 360',
   'Xbox Classic',
-  
+
   // Consoles - Nintendo
   'Nintendo Switch',
   'Nintendo Switch Lite',
@@ -56,15 +50,19 @@ const DEFAULT_EQUIPMENT = [
   'Super Nintendo (SNES)',
   'Nintendo DS',
   'Nintendo 3DS',
-  
+
   // Consoles - Outros
   'Atari 2600',
   'Sega Genesis',
   'Sega Dreamcast',
   'Steam Deck',
-  
-  // Periféricos
+
+  // TVs / Vídeo
+  'Smart TV',
+  'TV',
   'Monitor',
+
+  // Periféricos
   'Impressora',
   'Scanner',
   'Mouse',
@@ -72,7 +70,8 @@ const DEFAULT_EQUIPMENT = [
   'Webcam',
   'Roteador',
   'Modem',
-  
+  'Controle/Joystick',
+
   // Áudio
   'Headset',
   'Fone de Ouvido',
@@ -80,25 +79,24 @@ const DEFAULT_EQUIPMENT = [
   'Caixa de Som',
   'Soundbar',
   'Microfone',
-  
+
   // Armazenamento
   'HD Externo',
   'SSD',
   'Pen Drive',
   'Cartão de Memória',
-  
+
   // Componentes
   'Fonte de Alimentação',
   'Placa de Vídeo',
   'Placa-Mãe',
   'Memória RAM',
   'Processador',
-  
+
   // Acessórios
   'Carregador',
   'Cabo HDMI',
   'Adaptador',
-  'Controle/Joystick',
   'Teclado Gamer',
   'Mouse Gamer',
 ];
@@ -126,165 +124,155 @@ export function SmartInput({
   useEffect(() => {
     try {
       const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        setHistory(JSON.parse(saved));
-      }
+      if (saved) setHistory(JSON.parse(saved));
     } catch (error) {
       console.error('Erro ao carregar histórico:', error);
     }
   }, [storageKey]);
 
-  // Salvar no histórico
   const saveToHistory = (text: string) => {
     if (!text.trim() || text.length < 3) return;
 
-    const newHistory = [text, ...history.filter(h => h !== text)].slice(0, MAX_HISTORY);
-    setHistory(newHistory);
-    
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(newHistory));
-    } catch (error) {
-      console.error('Erro ao salvar histórico:', error);
-    }
+    const normalized = text.trim();
+
+    setHistory((prev) => {
+      const next = [normalized, ...prev.filter((x) => x !== normalized)].slice(0, MAX_HISTORY);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   };
 
-  // Filtrar sugestões baseado no texto digitado
-  useEffect(() => {
-    if (!value || value.length < 1) {
-      // Mostrar sugestões comuns quando vazio
-      setFilteredSuggestions(suggestions.slice(0, 8));
+  const updateFiltered = (text: string) => {
+    const q = text.trim().toLowerCase();
+    if (!q) {
+      setFilteredSuggestions([]);
       return;
     }
 
-    const searchTerm = value.toLowerCase();
+    // Prioriza histórico, depois lista default
+    const combined = [...history, ...suggestions].filter(Boolean);
+    const uniq = Array.from(new Set(combined));
 
-    // Combinar sugestões padrão e histórico
-    const allSuggestions = [...history, ...suggestions];
-    
-    // Filtrar sugestões que correspondem ao texto
-    const filtered = allSuggestions
-      .filter(s => s.toLowerCase().includes(searchTerm))
-      .filter(s => s.toLowerCase() !== value.toLowerCase())
-      .slice(0, 8);
+    const filtered = uniq
+      .filter((s) => s.toLowerCase().includes(q))
+      .slice(0, 10);
 
     setFilteredSuggestions(filtered);
-    setSelectedIndex(-1);
-  }, [value, history, suggestions]);
-
-  // Selecionar sugestão
-  const selectSuggestion = (suggestion: string) => {
-    onChange(suggestion);
-    setShowSuggestions(false);
-    setIsInteractingWithSuggestions(false);
-    inputRef.current?.focus();
   };
 
-  // Navegação por teclado
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  useEffect(() => {
+    updateFiltered(value);
+    setSelectedIndex(-1);
+  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fecha sugestões ao clicar fora
+  useEffect(() => {
+    const onDocMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!t) return;
+      if (suggestionsRef.current?.contains(t)) return;
+      if (inputRef.current?.contains(t)) return;
+      setShowSuggestions(false);
+      setSelectedIndex(-1);
+    };
+
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, []);
+
+  const onPick = (text: string) => {
+    onChange(text);
+    saveToHistory(text);
+    setShowSuggestions(false);
+    setSelectedIndex(-1);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (!showSuggestions || filteredSuggestions.length === 0) return;
 
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex(prev => 
-        prev < filteredSuggestions.length - 1 ? prev + 1 : prev
-      );
+      setSelectedIndex((p) => Math.min(p + 1, filteredSuggestions.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setSelectedIndex(prev => prev > 0 ? prev - 1 : -1);
-    } else if (e.key === 'Enter' && selectedIndex >= 0) {
-      e.preventDefault();
-      selectSuggestion(filteredSuggestions[selectedIndex]);
+      setSelectedIndex((p) => Math.max(p - 1, 0));
+    } else if (e.key === 'Enter') {
+      if (selectedIndex >= 0 && filteredSuggestions[selectedIndex]) {
+        e.preventDefault();
+        onPick(filteredSuggestions[selectedIndex]);
+      } else {
+        saveToHistory(value);
+        setShowSuggestions(false);
+      }
     } else if (e.key === 'Escape') {
       setShowSuggestions(false);
+      setSelectedIndex(-1);
     }
-  };
-
-  // Salvar no histórico ao perder foco
-  const handleBlur = () => {
-    if (!isInteractingWithSuggestions) {
-      setShowSuggestions(false);
-      if (value.trim()) {
-        saveToHistory(value.trim());
-      }
-    }
-  };
-
-  const handleFocus = () => {
-    setShowSuggestions(true);
-  };
-
-  // Prevenir fechamento ao interagir com sugestões
-  const handleSuggestionMouseDown = () => {
-    setIsInteractingWithSuggestions(true);
-  };
-
-  const handleSuggestionClick = (suggestion: string) => {
-    selectSuggestion(suggestion);
   };
 
   return (
-    <div className="relative">
-      <Input
-        ref={inputRef}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={handleKeyDown}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
-        placeholder={placeholder}
-        disabled={disabled}
-        className={className}
-      />
+    <div className={cn('relative', className)}>
+      <div className="flex gap-2">
+        <Input
+          ref={inputRef}
+          value={value}
+          disabled={disabled}
+          placeholder={placeholder}
+          onChange={(e) => {
+            onChange(e.target.value);
+            setShowSuggestions(true);
+          }}
+          onFocus={() => setShowSuggestions(true)}
+          onKeyDown={onKeyDown}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          onClick={() => {
+            if (value.trim()) saveToHistory(value);
+            setShowSuggestions(true);
+            inputRef.current?.focus();
+          }}
+          title="Sugestões"
+        >
+          <Plus className="h-4 w-4" />
+        </Button>
+      </div>
 
-      {/* Sugestões rápidas - sempre visíveis quando vazio */}
-      {!disabled && !value && !showSuggestions && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          <p className="text-xs text-muted-foreground w-full mb-1">
-            Equipamentos comuns (clique para selecionar):
-          </p>
-          {suggestions.slice(0, 6).map((equipment) => (
-            <Button
-              key={equipment}
+      {showSuggestions && filteredSuggestions.length > 0 && (
+        <div
+          ref={suggestionsRef}
+          className="absolute z-50 mt-2 w-full rounded-md border border-border bg-card/95 backdrop-blur shadow-lg overflow-hidden"
+          onMouseEnter={() => setIsInteractingWithSuggestions(true)}
+          onMouseLeave={() => setIsInteractingWithSuggestions(false)}
+        >
+          {filteredSuggestions.map((s, idx) => (
+            <button
+              key={s}
               type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => selectSuggestion(equipment)}
-              className="text-xs h-7"
+              className={cn(
+                'w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-muted/50 transition-colors',
+                idx === selectedIndex && 'bg-muted/50'
+              )}
+              onMouseMove={() => setSelectedIndex(idx)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onPick(s)}
             >
-              <Plus className="h-3 w-3 mr-1" />
-              {equipment}
-            </Button>
+              <span>{s}</span>
+              {s === value && <Check className="h-4 w-4 text-primary" />}
+            </button>
           ))}
         </div>
       )}
 
-      {/* Dropdown de sugestões */}
-      {showSuggestions && filteredSuggestions.length > 0 && (
-        <div
-          ref={suggestionsRef}
-          className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto"
-          onMouseDown={handleSuggestionMouseDown}
-        >
-          <div className="p-2 space-y-1">
-            <p className="text-xs text-muted-foreground px-2 py-1">
-              {value ? 'Sugestões (↑↓ para navegar, Enter para selecionar):' : 'Equipamentos comuns:'}
-            </p>
-            {filteredSuggestions.map((suggestion, index) => (
-              <div
-                key={index}
-                className={cn(
-                  "flex items-center justify-between gap-2 px-3 py-2 rounded-md cursor-pointer transition-colors",
-                  selectedIndex === index
-                    ? "bg-primary text-primary-foreground"
-                    : "hover:bg-muted"
-                )}
-                onClick={() => handleSuggestionClick(suggestion)}
-              >
-                <span className="text-sm flex-1">{suggestion}</span>
-                <Check className="h-4 w-4 opacity-50" />
-              </div>
-            ))}
-          </div>
+      {/* Se usuário está digitando e tem histórico/sugestões, mantém dropdown vivo */}
+      {showSuggestions && filteredSuggestions.length === 0 && value.trim().length >= 2 && !isInteractingWithSuggestions && (
+        <div className="absolute z-50 mt-2 w-full rounded-md border border-border bg-card/95 backdrop-blur shadow-lg px-3 py-2 text-sm text-muted-foreground">
+          Continue digitando para ver sugestões…
         </div>
       )}
     </div>

@@ -19,6 +19,9 @@ import type {
 import { supabase } from './supabase';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { addOfflineTask } from '@/utils/offlineQueue';
+import { v4 as uuid } from 'uuid';
+
 
 /**
  * Helper para tratamento de erros de API
@@ -417,17 +420,36 @@ export async function createMessage(message: {
   content: string;
   image_url?: string;
 }): Promise<Message> {
-  const { data, error } = await supabase
-    .from('messages')
-    .insert({
-      ...message,
-      image_url: message.image_url || null,
-    })
-    .select()
-    .single();
+  try {
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        ...message,
+        image_url: message.image_url || null,
+      })
+      .select()
+      .single();
 
-  if (error) throw error;
-  return data;
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    console.warn('⚠️ Mensagem salva offline:', error);
+
+    addOfflineTask({
+      id: uuid(),
+      type: 'CREATE_MESSAGE',
+      payload: message,
+      createdAt: Date.now(),
+      retries: 0,
+    });
+
+    // Retorno otimista (UI não quebra)
+    return {
+      id: `offline-${Date.now()}`,
+      ...message,
+      created_at: new Date().toISOString(),
+    } as Message;
+  }
 }
 
 export async function updateMessage(messageId: string, content: string): Promise<Message> {
