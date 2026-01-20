@@ -200,15 +200,17 @@ export async function createServiceOrder(order: {
     .single();
 
   if (error) throw error;
+// Create initial status history
+const { data: userRes, error: userErr } = await supabase.auth.getUser();
+if (userErr) throw userErr;
+const createdBy = userRes.user?.id ?? order.client_id;
 
-  // Create initial status history
-  await createOrderStatusHistory({
-    order_id: data.id,
-    status: 'received',
-    notes: 'Ordem de serviço criada',
-    created_by: order.client_id,
-  });
-
+await createOrderStatusHistory({
+  order_id: data.id,
+  status: 'received',
+  notes: 'Ordem de serviço criada',
+  created_by: createdBy,
+});
   // Create additional items if provided
   if (order.items && order.items.length > 0) {
     await createServiceOrderItems(data.id, order.items);
@@ -333,7 +335,7 @@ export async function createServiceOrderItems(
     serial_number?: string;
     description?: string;
   }>
-): Promise<ServiceOrderItem[]> {
+): Promise<void> {
   const itemsToInsert = items.map(item => ({
     service_order_id: orderId,
     equipment: item.equipment,
@@ -341,13 +343,14 @@ export async function createServiceOrderItems(
     description: item.description || null,
   }));
 
-  const { data, error } = await supabase
+  // ⚠️ IMPORTANTE:
+  // Não usar `.select()` aqui para evitar payload grande/espera longa no PWA.
+  // A UI não precisa dos itens retornados neste ponto.
+  const { error } = await supabase
     .from('service_order_items')
-    .insert(itemsToInsert)
-    .select();
+    .insert(itemsToInsert);
 
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
 }
 
 export async function updateServiceOrderItem(

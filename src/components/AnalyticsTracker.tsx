@@ -1,28 +1,31 @@
+// src/components/AnalyticsTracker.tsx
 import { useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
-import {
-  trackSessionStart,
-  trackPageView,
-  setupClickTracking,
-  shouldRunAnalytics,
-} from '@/services/analytics';
+import { trackSessionStart, trackPageView, setupClickTracking } from '@/services/analytics';
+
+const ANALYTICS_ENABLED = String(import.meta.env.VITE_ANALYTICS_ENABLED || 'true') === 'true';
 
 export function AnalyticsTracker() {
   const location = useLocation();
   const initialized = useRef(false);
 
+  const isPrivateRoute =
+    location.pathname.startsWith('/admin') || location.pathname.startsWith('/client');
+
+  const enabled = ANALYTICS_ENABLED && !isPrivateRoute;
+
   useEffect(() => {
-    if (!shouldRunAnalytics()) return;
+    if (!enabled) return;
 
     if (!initialized.current) {
       trackSessionStart().catch(() => {});
       setupClickTracking();
       initialized.current = true;
     }
-  }, []);
+  }, [enabled]);
 
   useEffect(() => {
-    if (!shouldRunAnalytics()) return;
+    if (!enabled) return;
 
     const path = location.pathname;
     const timer = setTimeout(() => {
@@ -30,7 +33,7 @@ export function AnalyticsTracker() {
     }, 100);
 
     return () => clearTimeout(timer);
-  }, [location.pathname]);
+  }, [location.pathname, enabled]);
 
   return null;
 }

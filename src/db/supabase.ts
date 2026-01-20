@@ -54,7 +54,32 @@ function getSessionStorageOrMemory(): Storage {
   }
 }
 
+
+// =======================================
+// ✅ fetch com timeout (evita spinner infinito no PWA)
+// =======================================
+const DEFAULT_FETCH_TIMEOUT_MS = 30000;
+
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  // Se alguém já passou um signal, “encadeia” abortos
+  const upstream = init?.signal;
+  if (upstream) {
+    if (upstream.aborted) controller.abort();
+    upstream.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+
+  return fetch(input, {
+    ...(init || {}),
+    cache: 'no-store',
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
+}
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+
   auth: {
     // ✅ GitHub Pages + HashRouter: ok
     flowType: 'implicit',
@@ -77,7 +102,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 
   // ✅ Evita cache estranho (SW / proxies) em requests do Supabase
   global: {
-    fetch: (url, options) => fetch(url, { ...(options || {}), cache: 'no-store' }),
+    fetch: (url, options) => fetchWithTimeout(url, options as any),
   },
 });
 
