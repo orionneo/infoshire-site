@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv, type UserConfigExport } from 'vite';
 import react from '@vitejs/plugin-react';
 import svgr from 'vite-plugin-svgr';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -6,27 +6,31 @@ import path from 'path';
 
 import { miaodaDevPlugin } from 'miaoda-sc-plugin';
 
-// Detecta quando está rodando no GitHub Actions (Pages)
-const isGH = process.env.GITHUB_ACTIONS === 'true';
+export default defineConfig(({ mode }) => {
+  // Carrega envs do Vite (VITE_*)
+  const env = loadEnv(mode, process.cwd(), '');
 
-// Base path:
-// - Em QA (GitHub Pages): /infoshire-site/
-// - Em produção (domínio): /
-// Você pode forçar via VITE_BASE_PATH no workflow/servidor
-const basePath =
-  (process.env.VITE_BASE_PATH && process.env.VITE_BASE_PATH.trim()) ||
-  (isGH ? '/infoshire-site/' : '/');
+  // Detecta GitHub Actions (Pages)
+  const isGH = process.env.GITHUB_ACTIONS === 'true';
 
-// Garantir formato correto (começa e termina com "/")
-const normalizedBase =
-  '/' + basePath.replace(/^\/+/, '').replace(/\/+$/, '') + '/';
+  /**
+   * Base path:
+   * - Produção com domínio próprio: "/"
+   * - GitHub Pages em subpath (QA): "/infoshire-site/"
+   * - Pode ser forçado via VITE_BASE_PATH no workflow
+   */
+  const basePathRaw =
+    (env.VITE_BASE_PATH && env.VITE_BASE_PATH.trim()) ||
+    (isGH ? '/infoshire-site/' : '/');
 
-export default defineConfig({
-  // ✅ Isso resolve paths no GitHub Pages (QA) e funciona no domínio (prod)
-  base: normalizedBase,
+  // Normaliza para sempre começar e terminar com "/"
+  const normalizedBase =
+    '/' + basePathRaw.replace(/^\/+/, '').replace(/\/+$/, '') + '/';
 
-  plugins: [
+  // Plugins (tipados como any[] para evitar conflitos de tipagem)
+  const plugins: any[] = [
     react(),
+
     svgr({
       svgrOptions: {
         icon: true,
@@ -34,6 +38,7 @@ export default defineConfig({
         namedExport: 'ReactComponent',
       },
     }),
+
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.png'],
@@ -47,72 +52,82 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait',
 
-        // ✅ IMPORTANTÍSSIMO: alinhar com o base
+        // IMPORTANTE: alinhar com o base
         scope: normalizedBase,
         start_url: normalizedBase,
 
         icons: [
           {
-            src: 'https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8slbycf711c0.png',
+            src: 'icons/icon-192.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'any',
           },
           {
-            src: 'https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8slbz7zou9kw.png',
+            src: 'icons/icon-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'any',
           },
           {
-            src: 'https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8slbycf711c0.png',
+            src: 'icons/icon-192.png',
             sizes: '192x192',
             type: 'image/png',
             purpose: 'maskable',
           },
           {
-            src: 'https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8slbz7zou9kw.png',
+            src: 'icons/icon-512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',
           },
         ],
       },
+
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
+
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'supabase-cache-v73',
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-          {
-            urlPattern: /^https:\/\/.*\.medo\.dev\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'images-cache-v73',
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 60 * 24 * 30 },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheName: 'supabase-cache-v74',
+              expiration: {
+                maxEntries: 50,
+                maxAgeSeconds: 60 * 60 * 24,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
             },
           },
         ],
       },
-      devOptions: { enabled: true },
-    }),
-    miaodaDevPlugin(),
-  ],
 
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
+      devOptions: {
+        enabled: true,
+      },
+    }),
+
+    miaodaDevPlugin(),
+  ];
+
+  const config = {
+    base: normalizedBase,
+
+    plugins,
+
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
     },
-  },
+  } satisfies UserConfigExport;
+
+  return config;
 });
