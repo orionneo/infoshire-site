@@ -255,6 +255,11 @@ const routes: RouteConfig[] = [
     path: '/admin/warranty-search',
     element: withAdminGuard(<WarrantySearch />),
   },
+  { 
+    name: '403',
+    path: '/403',
+    element: <Forbidden /> 
+  },
   {
     name: 'Warranty List',
     path: '/admin/warranty-list',
