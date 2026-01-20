@@ -1,4 +1,4 @@
-import { Apple, ChevronLeft, ChevronRight, Clock, Database, Gamepad2, HardDrive, Laptop, MessageCircle, MessageSquare, Monitor, Shield, Smartphone, Tv, Wrench, Zap } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Database, Gamepad2, HardDrive, Laptop, MessageSquare, Monitor, Shield, Star, Tv, Wrench, Zap } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { PublicLayout } from '@/components/layouts/PublicLayout';

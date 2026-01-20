@@ -119,23 +119,27 @@ export function IntelligentFlow({
     }
   };
 
-  const getDefaultDeadline = (equipment: string): number => {
-    const equipmentLower = equipment.toLowerCase();
-    
-    if (equipmentLower.includes('celular') || equipmentLower.includes('smartphone')) {
-      return 5;
-    } else if (equipmentLower.includes('notebook') || equipmentLower.includes('laptop')) {
-      return 7;
-    } else if (equipmentLower.includes('computador') || equipmentLower.includes('desktop')) {
-      return 7;
-    } else if (equipmentLower.includes('tablet')) {
-      return 5;
-    } else if (equipmentLower.includes('console') || equipmentLower.includes('videogame')) {
-      return 10;
-    } else {
-      return 7; // Default
-    }
-  };
+const getDefaultDeadline = (equipment: string): number => {
+  const equipmentLower = equipment.toLowerCase();
+
+  if (equipmentLower.includes('notebook') || equipmentLower.includes('laptop')) {
+    return 7;
+  } else if (equipmentLower.includes('computador') || equipmentLower.includes('desktop')) {
+    return 7;
+  } else if (equipmentLower.includes('tablet')) {
+    return 5;
+  } else if (
+    equipmentLower.includes('console') ||
+    equipmentLower.includes('videogame') ||
+    equipmentLower.includes('playstation') ||
+    equipmentLower.includes('xbox') ||
+    equipmentLower.includes('nintendo')
+  ) {
+    return 10;
+  } else {
+    return 7; // Default seguro
+  }
+};
 
   const detectInconsistencies = () => {
     const issues: string[] = [];
