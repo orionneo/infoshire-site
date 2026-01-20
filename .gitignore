@@ -5,3 +5,4 @@ _all_migrations.sql
 dist/
 
 supabase/.temp/
+.env.local
