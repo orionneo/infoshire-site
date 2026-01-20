@@ -20,6 +20,7 @@ import AIKnowledgeAdmin from './pages/admin/AIKnowledgeAdmin';
 import WarrantySearch from './pages/admin/WarrantySearch';
 import WarrantyList from './pages/admin/WarrantyList';
 
+import Forbidden from './pages/403';
 import BudgetApproval from './pages/BudgetApproval';
 import ChangePassword from './pages/ChangePassword';
 import Contact from './pages/Contact';
