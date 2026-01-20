@@ -7,30 +7,24 @@ import path from 'path';
 import { miaodaDevPlugin } from 'miaoda-sc-plugin';
 
 export default defineConfig(({ mode }) => {
-  // Carrega envs do Vite (VITE_*)
   const env = loadEnv(mode, process.cwd(), '');
-
-  // Detecta GitHub Actions (Pages)
   const isGH = process.env.GITHUB_ACTIONS === 'true';
 
-  /**
-   * Base path:
-   * - Produção com domínio próprio: "/"
-   * - GitHub Pages em subpath (QA): "/infoshire-site/"
-   * - Pode ser forçado via VITE_BASE_PATH no workflow
-   */
   const basePathRaw =
     (env.VITE_BASE_PATH && env.VITE_BASE_PATH.trim()) ||
     (isGH ? '/infoshire-site/' : '/');
 
-  // Normaliza para sempre começar e terminar com "/"
+  // ✅ NORMALIZAÇÃO CORRETA:
+  // se for root ("/" ou ""), retorna "/"
+  // senão garante "/xxx/"
+  const cleaned = (basePathRaw || '').trim();
   const normalizedBase =
-    '/' + basePathRaw.replace(/^\/+/, '').replace(/\/+$/, '') + '/';
+    cleaned === '' || cleaned === '/'
+      ? '/'
+      : '/' + cleaned.replace(/^\/+/, '').replace(/\/+$/, '') + '/';
 
-  // Plugins (tipados como any[] para evitar conflitos de tipagem)
   const plugins: any[] = [
     react(),
-
     svgr({
       svgrOptions: {
         icon: true,
@@ -38,7 +32,6 @@ export default defineConfig(({ mode }) => {
         namedExport: 'ReactComponent',
       },
     }),
-
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.png'],
@@ -52,76 +45,43 @@ export default defineConfig(({ mode }) => {
         display: 'standalone',
         orientation: 'portrait',
 
-        // IMPORTANTE: alinhar com o base
+        // ✅ alinhar com o base
         scope: normalizedBase,
         start_url: normalizedBase,
 
         icons: [
-          {
-            src: 'icons/icon-192.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'any',
-          },
-          {
-            src: 'icons/icon-512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'any',
-          },
-          {
-            src: 'icons/icon-192.png',
-            sizes: '192x192',
-            type: 'image/png',
-            purpose: 'maskable',
-          },
-          {
-            src: 'icons/icon-512.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'maskable',
-          },
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+          { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
-
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
             handler: 'NetworkFirst',
             options: {
-              cacheName: 'supabase-cache-v74',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
+              cacheName: 'supabase-cache-v75',
+              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
+              cacheableResponse: { statuses: [0, 200] },
             },
           },
         ],
       },
-
-      devOptions: {
-        enabled: true,
-      },
+      devOptions: { enabled: true },
     }),
-
     miaodaDevPlugin(),
   ];
 
   const config = {
     base: normalizedBase,
-
     plugins,
-
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
