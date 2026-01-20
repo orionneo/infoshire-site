@@ -32,7 +32,7 @@ export default function Services() {
       services: [
         {
           icon: Gamepad2,
-          title: 'PlayStation (PS5, PS4, PS3, PS2)',
+          title: 'PlayStation (PS5, PS4, PS3, PS2, PS1)',
           problem: 'Console não liga, superaquece, erro de leitura ou HDMI sem sinal?',
           description:
             'Reparo completo de consoles PlayStation: troca de fonte, reparo de placa-mãe, reballing de GPU, limpeza profunda e troca de pasta térmica.',
@@ -50,7 +50,8 @@ export default function Services() {
           icon: Gamepad2,
           title: 'Nintendo (Switch, Wii U, 3DS)',
           problem: 'Switch não carrega, Joy-Con com drift, tela quebrada ou não conecta na TV?',
-          description: 'Reparo de Nintendo Switch e portáteis: troca de tela, correção de drift, reparo de porta USB-C e dock.',
+          description:
+            'Reparo de Nintendo Switch e portáteis: troca de tela, correção de drift, reparo de porta USB-C e dock.',
           examples: ['Joy-Con com drift', 'Não carrega', 'Tela quebrada', 'Não conecta na TV'],
         },
         {
@@ -179,8 +180,7 @@ export default function Services() {
     {
       id: 'especializados',
       category: 'Serviços Especializados',
-      description:
-        'Técnicas avançadas de reparo eletrônico para casos complexos que outros não conseguem resolver.',
+      description: 'Técnicas avançadas de reparo eletrônico para casos complexos que outros não conseguem resolver.',
       icon: Wrench,
       services: [
         {
@@ -211,7 +211,8 @@ export default function Services() {
           icon: Shield,
           title: 'Manutenção Preventiva',
           problem: 'Quer evitar problemas futuros e prolongar a vida útil do seu equipamento?',
-          description: 'Check-up completo, limpeza interna, troca de pasta térmica, atualização de drivers e otimização de sistema.',
+          description:
+            'Check-up completo, limpeza interna, troca de pasta térmica, atualização de drivers e otimização de sistema.',
           examples: ['Limpeza preventiva', 'Troca de pasta térmica', 'Otimização', 'Check-up anual'],
         },
       ],
@@ -276,11 +277,12 @@ export default function Services() {
 
   return (
     <PublicLayout>
-      {/* Hero Section - alinhado com o estilo do Home */}
+      {/* HERO - mesmo “clima” do Home (glow + grid + gradiente) */}
       <section className="relative bg-transparent py-20 xl:py-32 overflow-hidden">
-        {/* Glow + pattern sutil */}
         <div className="absolute inset-0">
-          <div className="absolute inset-0 bg-primary/10 blur-3xl opacity-60"></div>
+          {/* glow */}
+          <div className="absolute inset-0 bg-primary/20 blur-3xl opacity-40" />
+          {/* grid radial */}
           <div
             className="absolute inset-0 opacity-10"
             style={{
@@ -288,21 +290,19 @@ export default function Services() {
               backgroundSize: '40px 40px',
             }}
           />
+          {/* contraste */}
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/40 to-transparent" />
         </div>
-
-        {/* Overlay de contraste */}
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/30 to-transparent"></div>
 
         <div className="container relative z-10">
           <div className="max-w-4xl mx-auto text-center">
             <h1 className="text-4xl xl:text-6xl font-bold mb-6 neon-glow">
-              Serviços Especializados em <span className="text-primary">Reparo e Manutenção</span>
+              Nossos <span className="text-primary">Serviços</span>
             </h1>
             <p className="text-xl xl:text-2xl text-gray-300 mb-8 leading-relaxed">
               Diagnóstico profissional, transparência total e experiência comprovada para resolver o problema do seu equipamento
             </p>
 
-            {/* Trust Badges */}
             <div className="flex flex-wrap justify-center gap-4 mb-10">
               <div className="inline-flex items-center gap-2 bg-card/50 backdrop-blur-sm px-4 py-2 rounded-full border border-primary/30">
                 <Star className="h-5 w-5 text-yellow-400 fill-yellow-400" />
@@ -318,7 +318,6 @@ export default function Services() {
               </div>
             </div>
 
-            {/* CTA Principal */}
             <a
               href={whatsappUrl}
               target="_blank"
@@ -332,7 +331,7 @@ export default function Services() {
         </div>
       </section>
 
-      {/* Serviços por Categoria */}
+      {/* CATEGORIAS - mesmos gradientes/transparência do Home (sem “chapar” preto) */}
       <section className="py-20 bg-transparent relative">
         <div className="container relative z-10">
           <div className="space-y-20">
@@ -340,7 +339,6 @@ export default function Services() {
               const CategoryIcon = category.icon;
               return (
                 <div key={category.id} id={category.id} className="scroll-mt-20">
-                  {/* Category Header */}
                   <div className="mb-12">
                     <div className="flex items-center gap-4 mb-4">
                       <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -351,7 +349,6 @@ export default function Services() {
                     <p className="text-lg xl:text-xl text-muted-foreground max-w-3xl">{category.description}</p>
                   </div>
 
-                  {/* Service Cards */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {category.services.map((service, index) => {
                       const ServiceIcon = service.icon;
@@ -362,10 +359,9 @@ export default function Services() {
                           className="bg-card/50 backdrop-blur border-border hover:border-primary transition-all duration-300 group hover-lift"
                         >
                           <CardContent className="p-6">
-                            {/* Icon and Title */}
                             <div className="flex items-start gap-4 mb-4">
                               <div className="relative shrink-0">
-                                <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                                <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                                 <div className="relative h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors duration-300">
                                   <ServiceIcon className="h-6 w-6 text-primary" />
                                 </div>
@@ -378,10 +374,8 @@ export default function Services() {
                               </div>
                             </div>
 
-                            {/* Description */}
                             <p className="text-muted-foreground mb-4 leading-relaxed">{service.description}</p>
 
-                            {/* Examples */}
                             {service.examples && service.examples.length > 0 && (
                               <div className="mb-4">
                                 <p className="text-sm font-semibold text-foreground mb-2">Exemplos comuns:</p>
@@ -396,7 +390,6 @@ export default function Services() {
                               </div>
                             )}
 
-                            {/* CTA Button */}
                             <a
                               href={whatsappUrl}
                               target="_blank"
@@ -418,7 +411,7 @@ export default function Services() {
         </div>
       </section>
 
-      {/* Diferenciais da Infoshire */}
+      {/* DIFERENCIAIS - igual Home (to-card/50) */}
       <section className="py-20 bg-gradient-to-b from-transparent to-card/50 relative">
         <div className="container relative z-10">
           <div className="max-w-4xl mx-auto">
@@ -433,7 +426,10 @@ export default function Services() {
               {differentials.map((item, index) => {
                 const Icon = item.icon;
                 return (
-                  <Card key={index} className="bg-card/50 backdrop-blur-sm border-border hover:border-primary/50 transition-all duration-300">
+                  <Card
+                    key={index}
+                    className="bg-card/50 backdrop-blur-sm border-border hover:border-primary/50 transition-all duration-300 hover-lift"
+                  >
                     <CardContent className="p-6">
                       <div className="flex items-start gap-4">
                         <div className="h-12 w-12 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
@@ -453,8 +449,8 @@ export default function Services() {
         </div>
       </section>
 
-      {/* Como Funciona o Atendimento */}
-      <section className="py-20 bg-card/40 relative">
+      {/* COMO FUNCIONA - sem fundo chapado, com blur igual Home */}
+      <section className="py-20 bg-transparent relative">
         <div className="container relative z-10">
           <div className="max-w-5xl mx-auto">
             <div className="text-center mb-12">
@@ -469,16 +465,14 @@ export default function Services() {
                 const Icon = step.icon;
                 return (
                   <div key={index} className="relative">
-                    {/* Connector Line (desktop only) */}
                     {index < howItWorks.length - 1 && (
-                      <div className="hidden xl:block absolute top-12 left-[60%] w-[80%] h-0.5 bg-primary/30"></div>
+                      <div className="hidden xl:block absolute top-12 left-[60%] w-[80%] h-0.5 bg-primary/30" />
                     )}
 
-                    <Card className="bg-background/60 backdrop-blur border-border hover:border-primary transition-all duration-300 relative z-10">
+                    <Card className="bg-card/40 backdrop-blur border-border hover:border-primary transition-all duration-300 relative z-10 hover-lift">
                       <CardContent className="p-6 text-center">
-                        {/* Step Number */}
                         <div className="relative inline-flex items-center justify-center mb-4">
-                          <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full"></div>
+                          <div className="absolute inset-0 bg-primary/20 blur-xl rounded-full" />
                           <div className="relative h-16 w-16 rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center">
                             <Icon className="h-8 w-8 text-primary" />
                           </div>
@@ -499,11 +493,11 @@ export default function Services() {
         </div>
       </section>
 
-      {/* CTA Final */}
+      {/* CTA FINAL - padrão Home */}
       <section className="py-20 bg-gradient-to-b from-card/50 to-transparent relative">
         <div className="container relative z-10">
           <div className="max-w-4xl mx-auto">
-            <Card className="bg-gradient-to-br from-primary/10 to-primary/5 border-primary/30 overflow-hidden">
+            <Card className="bg-gradient-to-br from-primary/10 to-primary/5 border-primary/30 overflow-hidden hover-lift">
               <CardContent className="p-8 xl:p-12 text-center">
                 <div className="inline-flex items-center gap-2 bg-primary/10 px-4 py-2 rounded-full border border-primary/30 mb-6">
                   <Shield className="h-5 w-5 text-primary" />
@@ -538,7 +532,6 @@ export default function Services() {
                   </Button>
                 </div>
 
-                {/* Trust Elements */}
                 <div className="flex flex-wrap justify-center gap-6 mt-10 pt-8 border-t border-primary/20">
                   <div className="text-center">
                     <div className="text-2xl font-bold text-primary mb-1">4.9⭐</div>
