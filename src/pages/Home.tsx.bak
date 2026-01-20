@@ -50,19 +50,19 @@ export default function Home() {
       title: 'Notebooks, PCs e Macs',
       description: 'Diagnóstico completo, reparo avançado de periféricos, upgrades, modding e recuperação de dados',
       icon: Laptop,
-      image: '/assets/medo/medo-a0e81ae61b.jpg',
+      image: 'https://miaoda-site-img.s3cdn.medo.dev/images/0e63658a-96b2-4b84-be61-8c2e12bde550.jpg',
     },
     {
       title: 'Videogames',
       description: 'Reparo especializado para todas as plataformas: PlayStation, Xbox, Nintendo e consoles retro',
       icon: Gamepad2,
-      image: '/assets/medo/medo-adf157f218.jpg',
+      image: 'https://miaoda-site-img.s3cdn.medo.dev/images/8e5ebfd0-c668-4180-9ded-00a6608915fa.jpg',
     },
     {
       title: 'Eletrônicos',
       description: 'Smart TVs, placas de vídeo, recuperação de placas eletrônicas e reballing profissional',
       icon: Monitor,
-      image: '/assets/medo/medo-1bc8081232.jpg',
+      image: 'https://miaoda-site-img.s3cdn.medo.dev/images/c5d8788f-8460-4b8b-99e7-074376e56c19.jpg',
     },
   ];
 
@@ -80,7 +80,7 @@ export default function Home() {
               <div className="w-full max-w-lg xl:max-w-3xl relative px-4">
                 <div className="absolute inset-0 bg-primary/20 blur-3xl animate-pulse"></div>
                 <img
-                  src="/assets/medo/medo-0a93bf9c85.png"
+                  src="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8skva38pgzcw.png"
                   alt="InfoShire - Games e Informática"
                   className="relative w-full h-auto object-contain drop-shadow-[0_0_25px_rgba(139,255,0,0.9)] animate-float"
                 />

@@ -32,7 +32,7 @@ export default function About() {
       <section className="relative bg-black py-20 xl:py-32 overflow-hidden">
         <div className="absolute inset-0 opacity-40">
           <img
-            src="/assets/medo/medo-53937debc3.jpg"
+            src="https://miaoda-site-img.s3cdn.medo.dev/images/8e932b11-2e7c-4353-a4d9-a65d6c654b17.jpg"
             alt="Reparo de precisão com microscópio"
             className="w-full h-full object-cover"
           />
@@ -46,7 +46,7 @@ export default function About() {
               <div className="w-full max-w-sm xl:max-w-xl relative px-4">
                 <div className="absolute inset-0 bg-primary/20 blur-3xl animate-pulse"></div>
                 <img
-                  src="/assets/medo/medo-0a93bf9c85.png"
+                  src="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8skva38pgzcw.png"
                   alt="InfoShire Logo"
                   className="relative w-full h-auto object-contain drop-shadow-[0_0_25px_rgba(139,255,0,0.9)] animate-float"
                 />
@@ -119,7 +119,7 @@ export default function About() {
                 {/* Laboratory Equipment */}
                 <div className="relative group overflow-hidden rounded-lg border border-border hover:border-primary transition-all duration-300">
                   <img
-                    src="/assets/medo/medo-24c6723f90.png"
+                    src="https://miaoda-edit-image.s3cdn.medo.dev/8pj0bpgfx6v5/IMG-8qe1utn2uneo.png"
                     alt="Laboratório de eletrônicos com equipamentos de última geração"
                     className="w-full h-64 object-cover transition-transform duration-500 group-hover:scale-110"
                   />
@@ -134,7 +134,7 @@ export default function About() {
                 {/* Microscope Repair */}
                 <div className="relative group overflow-hidden rounded-lg border border-border hover:border-primary transition-all duration-300">
                   <img
-                    src="/assets/medo/medo-474fd33d62.png"
+                    src="https://miaoda-edit-image.s3cdn.medo.dev/8pj0bpgfx6v5/IMG-8qe24workqv4.png"
                     alt="Reparo de precisão com microscópio profissional"
                     className="w-full h-64 object-cover transition-transform duration-500 group-hover:scale-110"
                   />
@@ -149,7 +149,7 @@ export default function About() {
                 {/* Workshop Tools */}
                 <div className="relative group overflow-hidden rounded-lg border border-border hover:border-primary transition-all duration-300">
                   <img
-                    src="/assets/medo/medo-11265f854b.png"
+                    src="https://miaoda-edit-image.s3cdn.medo.dev/8pj0bpgfx6v5/IMG-8qe2fvay3pxc.png"
                     alt="Ferramentas e equipamentos profissionais de reparo"
                     className="w-full h-64 object-cover transition-transform duration-500 group-hover:scale-110"
                   />
@@ -164,7 +164,7 @@ export default function About() {
                 {/* Testing Equipment */}
                 <div className="relative group overflow-hidden rounded-lg border border-border hover:border-primary transition-all duration-300">
                   <img
-                    src="/assets/medo/medo-58e085c6b1.png"
+                    src="https://miaoda-edit-image.s3cdn.medo.dev/8pj0bpgfx6v5/IMG-8qe2s59vc0e8.png"
                     alt="Equipamentos de teste e diagnóstico eletrônico"
                     className="w-full h-64 object-cover transition-transform duration-500 group-hover:scale-110"
                   />
