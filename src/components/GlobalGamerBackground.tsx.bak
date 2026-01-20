@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 
 // URL da imagem oficial INFOSHIRE_GAMER_BG
-const BG_URL = '/assets/medo/medo-3ff2109aaf.png';
+const BG_URL = 'https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260117/file-8z7cckveku80.png';
 
 export default function GlobalGamerBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);

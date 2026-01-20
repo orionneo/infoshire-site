@@ -97,7 +97,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
               {/* Logo Image */}
               <div className="h-12 w-12 flex items-center justify-center">
                 <img
-                  src="/assets/medo/medo-0a93bf9c85.png"
+                  src="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8skva38pgzcw.png"
                   alt="InfoShire Logo"
                   className="h-full w-full object-contain drop-shadow-[0_0_12px_rgba(139,255,0,0.8)]"
                 />
@@ -481,7 +481,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
               <div className="flex items-center justify-between px-2">
                 {/* Mario */}
                 <img
-                  src="/assets/medo/medo-b37e982f6e.png"
+                  src="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8sb3up2hmry8.png"
                   alt="Mario"
                   className="h-16 w-auto object-contain"
                 />
@@ -495,7 +495,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
                 >
                   <p className="text-[10px] font-semibold text-muted-foreground/90">Parceiro Oficial</p>
                   <img
-                    src="/assets/medo/medo-1ed4bdd794.png"
+                    src="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260106/file-8qe5svv6t1q8.png"
                     alt="Global Electronics"
                     className="h-6 w-auto object-contain"
                   />
@@ -503,7 +503,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
 
                 {/* Astrobot */}
                 <img
-                  src="/assets/medo/medo-8c7235cce7.png"
+                  src="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8sb3up2hn4lc.png"
                   alt="Astrobot"
                   className="h-16 w-auto object-contain"
                 />
@@ -748,7 +748,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
                       className="flex items-center gap-3 bg-black px-6 py-3 rounded-lg border border-primary/30 hover:border-primary transition-all duration-300 hover:scale-105 group"
                     >
                       <img
-                        src="/assets/medo/medo-1ed4bdd794.png"
+                        src="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260106/file-8qe5svv6t1q8.png"
                         alt="Global Electronics - Distribuidor Autorizado"
                         className="h-8 sm:h-10 w-auto object-contain"
                       />
@@ -766,7 +766,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
                 <div className="relative mt-6 flex items-center justify-center sm:justify-between max-w-4xl mx-auto px-4">
                   <div className="relative group hidden sm:block">
                     <img
-                      src="/assets/medo/medo-b37e982f6e.png"
+                      src="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8sb3up2hmry8.png"
                       alt="Mario"
                       className="h-20 sm:h-24 md:h-32 w-auto object-contain transition-transform duration-300 group-hover:scale-110 group-hover:drop-shadow-[0_0_20px_rgba(0,255,0,0.6)]"
                     />
@@ -778,7 +778,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
 
                   <div className="relative group hidden sm:block">
                     <img
-                      src="/assets/medo/medo-8c7235cce7.png"
+                      src="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8sb3up2hn4lc.png"
                       alt="Astrobot"
                       className="h-20 sm:h-24 md:h-32 w-auto object-contain transition-transform duration-300 group-hover:scale-110 group-hover:drop-shadow-[0_0_20px_rgba(0,255,0,0.6)]"
                     />

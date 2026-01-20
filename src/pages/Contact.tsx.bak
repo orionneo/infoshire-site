@@ -40,7 +40,7 @@ export default function Contact() {
       <section className="relative bg-black py-20 xl:py-32 overflow-hidden">
         <div className="absolute inset-0 opacity-40">
           <img
-            src="/assets/medo/medo-78b778b615.jpg"
+            src="https://miaoda-site-img.s3cdn.medo.dev/images/e3a6b927-34cf-4ca0-a3d8-0417f5d2dc8a.jpg"
             alt="Equipamentos de teste e diagnóstico"
             className="w-full h-full object-cover"
           />
@@ -54,7 +54,7 @@ export default function Contact() {
               <div className="w-full max-w-sm xl:max-w-xl relative px-4">
                 <div className="absolute inset-0 bg-primary/20 blur-3xl animate-pulse"></div>
                 <img
-                  src="/assets/medo/medo-0a93bf9c85.png"
+                  src="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8skva38pgzcw.png"
                   alt="InfoShire Logo"
                   className="relative w-full h-auto object-contain drop-shadow-[0_0_25px_rgba(139,255,0,0.9)] animate-float"
                 />
@@ -230,7 +230,7 @@ export default function Contact() {
               {/* Laboratory */}
               <div className="relative group overflow-hidden rounded-lg border border-border hover:border-primary transition-all duration-300">
                 <img
-                  src="/assets/medo/medo-0793200695.png"
+                  src="https://miaoda-edit-image.s3cdn.medo.dev/8pj0bpgfx6v5/IMG-8qfb6cb3sd1c.png"
                   alt="Laboratório InfoShire - Equipamentos profissionais"
                   className="w-full h-64 object-cover transition-transform duration-500 group-hover:scale-110"
                 />
@@ -245,7 +245,7 @@ export default function Contact() {
               {/* Precision Work */}
               <div className="relative group overflow-hidden rounded-lg border border-border hover:border-primary transition-all duration-300">
                 <img
-                  src="/assets/medo/medo-f8f9536bee.png"
+                  src="https://miaoda-edit-image.s3cdn.medo.dev/8pj0bpgfx6v5/IMG-8qfbu0ogfw1s.png"
                   alt="Trabalho de precisão com microscópio"
                   className="w-full h-64 object-cover transition-transform duration-500 group-hover:scale-110"
                 />
@@ -260,7 +260,7 @@ export default function Contact() {
               {/* Testing Equipment */}
               <div className="relative group overflow-hidden rounded-lg border border-border hover:border-primary transition-all duration-300">
                 <img
-                  src="/assets/medo/medo-a45c1be7e2.png"
+                  src="https://miaoda-edit-image.s3cdn.medo.dev/8pj0bpgfx6v5/IMG-8rvp68q4jf9c.png"
                   alt="Equipamentos de teste e diagnóstico"
                   className="w-full h-64 object-cover transition-transform duration-500 group-hover:scale-110"
                 />
