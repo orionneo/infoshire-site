@@ -1,17 +1,26 @@
 /**
  * Utilitário para verificar conectividade e status do Supabase
- * - Evita usar tabela sensível (profiles) para "ping"
- * - Usa RPC public.ping() (rápido, estável e controlado)
+ * Objetivos:
+ * - NÃO poluir UI (quem decide mostrar algo é o ConnectionStatus)
+ * - NÃO gerar falso negativo em PWA/mobile (background / iOS throttling)
+ * - NÃO depender de tabela sensível (profiles) para ping
+ * - Usar RPC public.ping() (rápido, controlado)
  *
- * Observação (TypeScript/Supabase):
- * - Em algumas versões, supabase.rpc() NÃO é tipado como Promise<T> diretamente.
- * - Para aplicar timeout via Promise.race, embrulhamos em Promise.resolve().then(() => supabase.rpc(...))
+ * Observação importante:
+ * - supabase.rpc() retorna um "builder" (não é Promise). Então o timeout precisa
+ *   envolver a execução do builder via .then() (await), usando um factory.
  */
 
 import { supabase } from '@/db/supabase';
 
 export function isOnline(): boolean {
   return navigator.onLine;
+}
+
+export function isBackground(): boolean {
+  // PWA/mobile: quando a aba fica em background, iOS/Android podem pausar rede,
+  // gerando timeouts falsos. Então evitamos checar nesse estado.
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
 }
 
 export type CheckResult = {
@@ -21,59 +30,69 @@ export type CheckResult = {
   code?: string;
 };
 
-function isBackground(): boolean {
-  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
-}
-
 /**
- * Timeout via Promise.race (não depende de AbortSignal — mais compatível com supabase-js)
+ * Timeout por Promise.race (compatível com qualquer Promise)
+ * - "factory" garante que só criamos a promise quando vamos executar
+ * - Não tenta abortar (porque o builder do supabase não é Promise abortável de forma estável via types)
  */
 function withTimeout<T>(factory: () => Promise<T>, ms = 9000): Promise<T> {
-  let timer: number | undefined;
+  return new Promise<T>((resolve, reject) => {
+    let done = false;
 
-  const timeoutPromise = new Promise<T>((_, reject) => {
-    timer = window.setTimeout(() => reject(new Error('timeout')), ms);
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error('timeout'));
+    }, ms);
+
+    factory()
+      .then((v) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve(v);
+      })
+      .catch((e) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        reject(e);
+      });
   });
-
-  const runPromise = Promise.resolve().then(factory);
-
-  return Promise.race([runPromise, timeoutPromise]).finally(() => {
-    if (timer) window.clearTimeout(timer);
-  }) as Promise<T>;
-}
-
-function normalizeError(err: any): { message: string; code?: string } {
-  const code = err?.code ?? err?.status ?? undefined;
-  const msg = String(err?.message || '');
-
-  if (msg === 'timeout') {
-    return { message: 'Timeout ao verificar servidor.', code: String(code ?? '') || undefined };
-  }
-
-  const lower = msg.toLowerCase();
-
-  if (
-    lower.includes('failed to fetch') ||
-    lower.includes('networkerror') ||
-    lower.includes('load failed') ||
-    lower.includes('net::err') ||
-    lower.includes('fetch')
-  ) {
-    return { message: 'Falha de rede ao acessar o servidor.', code: String(code ?? '') || undefined };
-  }
-
-  if (lower.includes('cors') || lower.includes('blocked')) {
-    return { message: 'Requisição bloqueada (CORS/bloqueio de rede).', code: String(code ?? '') || undefined };
-  }
-
-  return { message: msg || 'Erro desconhecido', code: String(code ?? '') || undefined };
 }
 
 /**
- * Checa a conectividade com o Supabase via RPC ping().
+ * Normaliza mensagens de erro para não ficar tudo "timeout"
+ */
+function normalizeError(err: any): { message: string; code?: string } {
+  const code = err?.code ? String(err.code) : undefined;
+  const msg = String(err?.message || err?.error_description || err?.details || '').toLowerCase();
+
+  if (msg.includes('timeout')) {
+    return { message: 'Timeout ao verificar Supabase (PWA/mobile pode pausar rede em background).', code };
+  }
+
+  // Erros comuns de rede
+  if (
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('network error') ||
+    msg.includes('load failed') ||
+    msg.includes('fetch') ||
+    msg.includes('connection')
+  ) {
+    return { message: 'Falha de rede ao conectar no servidor.', code };
+  }
+
+  // fallback
+  return { message: err?.message || 'Erro desconhecido', code };
+}
+
+/**
+ * Verifica a conexão com Supabase via RPC ping()
  *
- * @param timeoutMs Timeout (mobile pode precisar de mais)
- * @param allowBackground Se false, não checa quando app está em background (reduz falso negativo em PWA)
+ * @param timeoutMs tempo máximo da tentativa
+ * @param allowBackground se false, ignora checagem quando app estiver em background (recomendado)
  */
 export async function checkSupabaseConnection(
   timeoutMs = 9000,
@@ -83,16 +102,19 @@ export async function checkSupabaseConnection(
     return { success: false, message: 'Sem conexão com a internet' };
   }
 
-  // Em PWA/mobile, quando fica em background, pode atrasar e gerar falso timeout
+  // Evita falso timeout em PWA/mobile
   if (!allowBackground && isBackground()) {
-    return { success: true, message: 'OK (background ignorado)' };
+    return { success: true, message: 'Ignorado em background' };
   }
 
   const start = performance.now();
 
   try {
+    // supabase.rpc retorna builder; o await transforma em Promise (executa)
     const { data, error } = await withTimeout(
-      () => Promise.resolve().then(() => supabase.rpc('ping')),
+      async () => {
+        return await supabase.rpc('ping');
+      },
       timeoutMs
     );
 
@@ -103,11 +125,12 @@ export async function checkSupabaseConnection(
         success: false,
         message: `Supabase respondeu com erro: ${error.message}`,
         latency,
-        code: (error as any).code ?? undefined,
+        code: error.code ?? undefined,
       };
     }
 
-    if (!(data as any)?.ok) {
+    // Esperado: { ok: true }
+    if (!data || (typeof data === 'object' && 'ok' in data && !(data as any).ok)) {
       return { success: false, message: 'Ping retornou resposta inesperada', latency };
     }
 
@@ -115,12 +138,18 @@ export async function checkSupabaseConnection(
   } catch (err: any) {
     const latency = Math.round(performance.now() - start);
     const normalized = normalizeError(err);
-    return { success: false, message: normalized.message, latency, code: normalized.code };
+
+    return {
+      success: false,
+      message: normalized.message,
+      latency,
+      code: normalized.code,
+    };
   }
 }
 
 /**
- * Monitora mudanças no status da conexão
+ * Monitora mudanças no status da conexão do browser (online/offline)
  */
 export function setupNetworkMonitoring(onOnline?: () => void, onOffline?: () => void): () => void {
   const handleOnline = () => onOnline?.();
@@ -129,15 +158,8 @@ export function setupNetworkMonitoring(onOnline?: () => void, onOffline?: () => 
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
 
-  // Útil no PWA: ao voltar do background, revalida se estiver online
-  const handleVisibility = () => {
-    if (document.visibilityState === 'visible' && navigator.onLine) onOnline?.();
-  };
-  document.addEventListener('visibilitychange', handleVisibility);
-
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);
-    document.removeEventListener('visibilitychange', handleVisibility);
   };
 }
