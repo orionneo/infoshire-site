@@ -1,5 +1,83 @@
-// src/lib/analytics.ts
+// src/services/analytics.ts
 import { supabase } from '@/db/supabase';
+
+// ============================================
+// CONSTANTS / FLAGS (anti-loop e anti-travamento)
+// ============================================
+
+const DISABLE_KEY = 'analytics_disabled_until';
+const VISITOR_KEY = 'analytics_visitor_id';
+const SESSION_KEY = 'analytics_session_id';
+const SESSION_STARTED_KEY = 'analytics_session_started';
+
+// Quanto tempo desliga quando der erro (pra não ficar batendo infinito)
+const DISABLE_ON_RLS_MINUTES = 60 * 24; // 24h
+const DISABLE_ON_AUTH_MINUTES = 60 * 24; // 24h
+const DISABLE_ON_NETWORK_MINUTES = 10; // 10 min
+
+// Heartbeat agressivo causa spam e lag; 15s é muito mais seguro
+const HEARTBEAT_MS = 15000;
+
+// ============================================
+// SAFE STORAGE (Tracking Prevention / iOS / Private mode)
+// ============================================
+
+function safeGet(storage: Storage | null, key: string): string | null {
+  try {
+    if (!storage) return null;
+    return storage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeSet(storage: Storage | null, key: string, value: string): void {
+  try {
+    if (!storage) return;
+    storage.setItem(key, value);
+  } catch {
+    // ignorar (tracking prevention / private)
+  }
+}
+
+function nowMs(): number {
+  return Date.now();
+}
+
+function disableAnalyticsForMinutes(minutes: number) {
+  const until = nowMs() + minutes * 60 * 1000;
+  // tenta sessionStorage primeiro (menos bloqueado), depois localStorage
+  safeSet(sessionStorage, DISABLE_KEY, String(until));
+  safeSet(localStorage, DISABLE_KEY, String(until));
+}
+
+function isAnalyticsDisabled(): boolean {
+  const v = safeGet(sessionStorage, DISABLE_KEY) || safeGet(localStorage, DISABLE_KEY);
+  if (!v) return false;
+  const until = Number(v);
+  if (!Number.isFinite(until)) return false;
+  return nowMs() < until;
+}
+
+/**
+ * Decide se deve rodar analytics nesta rota/ambiente.
+ * - Não roda no /admin (admin não precisa de tracking público e pode causar erros/ruído)
+ * - Não roda se estiver desabilitado por falhas anteriores (RLS/401/rede)
+ * - Não roda para bots
+ */
+export function shouldRunAnalytics(): boolean {
+  try {
+    const path = window.location?.pathname || '';
+    if (path.startsWith('/admin')) return false;
+  } catch {
+    // ignore
+  }
+
+  if (isAnalyticsDisabled()) return false;
+  if (isBot()) return false;
+
+  return true;
+}
 
 // ============================================
 // HELPERS
@@ -7,16 +85,13 @@ import { supabase } from '@/db/supabase';
 
 function safeUUID(): string {
   try {
-    // browsers modernos
     return crypto.randomUUID();
   } catch {
-    // fallback simples
     return `uuid_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   }
 }
 
 function isConflictError(err: any): boolean {
-  // PostgrestError costuma vir com .code (23505) ou status 409 no fetch
   const code = err?.code;
   const msg = String(err?.message || '').toLowerCase();
   const details = String(err?.details || '').toLowerCase();
@@ -30,31 +105,70 @@ function isConflictError(err: any): boolean {
   );
 }
 
+function isRlsOrPermissionError(err: any): boolean {
+  const code = String(err?.code || '');
+  const msg = String(err?.message || '').toLowerCase();
+  // 42501 = insufficient_privilege
+  return code === '42501' || msg.includes('row-level security') || msg.includes('permission') || msg.includes('not allowed');
+}
+
+function isAuthError(err: any): boolean {
+  const status = err?.status;
+  const msg = String(err?.message || '').toLowerCase();
+  return status === 401 || msg.includes('unauthorized') || msg.includes('jwt') || msg.includes('invalid token');
+}
+
+function isNetworkError(err: any): boolean {
+  const msg = String(err?.message || '').toLowerCase();
+  return (
+    !navigator.onLine ||
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('timeout')
+  );
+}
+
+// Logger anti-spam (1 log a cada 10s no máximo)
+let lastLogMs = 0;
+function logOncePer10s(...args: any[]) {
+  const t = nowMs();
+  if (t - lastLogMs < 10000) return;
+  lastLogMs = t;
+  console.error(...args);
+}
+
+function handleAnalyticsError(context: string, err: any) {
+  // se forem erros de permissão, desliga por 24h
+  if (isRlsOrPermissionError(err)) disableAnalyticsForMinutes(DISABLE_ON_RLS_MINUTES);
+  if (isAuthError(err)) disableAnalyticsForMinutes(DISABLE_ON_AUTH_MINUTES);
+  if (isNetworkError(err)) disableAnalyticsForMinutes(DISABLE_ON_NETWORK_MINUTES);
+
+  logOncePer10s(`[ANALYTICS] ${context}:`, err);
+}
+
 // ============================================
 // VISITOR & SESSION MANAGEMENT
 // ============================================
 
 export function getOrCreateVisitorId(): string {
-  const VISITOR_KEY = 'analytics_visitor_id';
-
-  let visitorId = localStorage.getItem(VISITOR_KEY);
+  // tenta localStorage, se falhar usa sessionStorage, se falhar gera “ephemeral”
+  let visitorId = safeGet(localStorage, VISITOR_KEY) || safeGet(sessionStorage, VISITOR_KEY);
 
   if (!visitorId) {
     visitorId = safeUUID();
-    localStorage.setItem(VISITOR_KEY, visitorId);
+    safeSet(localStorage, VISITOR_KEY, visitorId);
+    safeSet(sessionStorage, VISITOR_KEY, visitorId);
   }
 
   return visitorId;
 }
 
 export function getSessionId(): string {
-  const SESSION_KEY = 'analytics_session_id';
-
-  let sessionId = sessionStorage.getItem(SESSION_KEY);
+  let sessionId = safeGet(sessionStorage, SESSION_KEY);
 
   if (!sessionId) {
     sessionId = safeUUID();
-    sessionStorage.setItem(SESSION_KEY, sessionId);
+    safeSet(sessionStorage, SESSION_KEY, sessionId);
   }
 
   return sessionId;
@@ -128,7 +242,9 @@ export function getDeviceType(): string {
   const userAgent = navigator.userAgent.toLowerCase();
 
   if (/(tablet|ipad|playbook|silk)|(android(?!.*mobi))/i.test(userAgent)) return 'tablet';
-  if (/Mobile|Android|iP(hone|od)|IEMobile|BlackBerry|Kindle|Silk-Accelerated|(hpw|web)OS|Opera M(obi|ini)/.test(userAgent))
+  if (
+    /Mobile|Android|iP(hone|od)|IEMobile|BlackBerry|Kindle|Silk-Accelerated|(hpw|web)OS|Opera M(obi|ini)/.test(userAgent)
+  )
     return 'mobile';
 
   return 'desktop';
@@ -147,11 +263,16 @@ export function getBrowser(): string {
 }
 
 /**
- * Geolocalização via IP (com timeout, para não travar o app)
+ * Geolocalização via IP:
+ * - timeout curto (1.2s)
+ * - se offline, não tenta
+ * - nunca quebra fluxo
  */
 export async function getGeolocation(): Promise<{ city: string | null; country: string | null }> {
+  if (!navigator.onLine) return { city: null, country: null };
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1800);
+  const timeout = setTimeout(() => controller.abort(), 1200);
 
   try {
     const response = await fetch('https://ipapi.co/json/', {
@@ -160,20 +281,14 @@ export async function getGeolocation(): Promise<{ city: string | null; country: 
       signal: controller.signal,
     });
 
-    if (!response.ok) {
-      console.error('[ANALYTICS] Erro ao buscar geolocalização:', response.status);
-      return { city: null, country: null };
-    }
-
+    if (!response.ok) return { city: null, country: null };
     const data = await response.json();
 
     return {
       city: data.city || null,
       country: data.country_name || null,
     };
-  } catch (error) {
-    // timeout/offline/etc.
-    console.error('[ANALYTICS] Erro ao buscar geolocalização:', error);
+  } catch {
     return { city: null, country: null };
   } finally {
     clearTimeout(timeout);
@@ -185,13 +300,13 @@ export async function getGeolocation(): Promise<{ city: string | null; country: 
 // ============================================
 
 let sessionStartTime: number | null = null;
-let lastActivityTime: number | null = null;
 let durationUpdateInterval: any | null = null;
 
 export async function trackSessionStart(): Promise<boolean> {
   try {
-    const SESSION_STARTED_KEY = 'analytics_session_started';
-    if (sessionStorage.getItem(SESSION_STARTED_KEY) === 'true') return true;
+    if (!shouldRunAnalytics()) return false;
+
+    if (safeGet(sessionStorage, SESSION_STARTED_KEY) === 'true') return true;
 
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
@@ -201,10 +316,9 @@ export async function trackSessionStart(): Promise<boolean> {
     const browser = getBrowser();
     const isBotUser = isBot();
 
-    // Geolocalização NÃO pode travar o fluxo
     const location = await getGeolocation();
 
-    // 1) Inserir sessão (se der conflito, consideramos OK)
+    // 1) Inserir sessão
     const { error: sessionError } = await supabase.from('analytics_sessions').insert({
       session_id: sessionId,
       visitor_id: visitorId,
@@ -223,11 +337,11 @@ export async function trackSessionStart(): Promise<boolean> {
     });
 
     if (sessionError && !isConflictError(sessionError)) {
-      console.error('[ANALYTICS] Erro ao inserir sessão:', sessionError);
+      handleAnalyticsError('Erro ao inserir sessão', sessionError);
       // não derruba app
     }
 
-    // 2) Inserir origem (erro aqui também não derruba)
+    // 2) Inserir origem
     const { error: sourceError } = await supabase.from('analytics_sources').insert({
       session_id: sessionId,
       source_type: sourceType,
@@ -238,17 +352,16 @@ export async function trackSessionStart(): Promise<boolean> {
     });
 
     if (sourceError && !isConflictError(sourceError)) {
-      console.error('[ANALYTICS] Erro ao inserir origem:', sourceError);
+      handleAnalyticsError('Erro ao inserir origem', sourceError);
     }
 
-    sessionStorage.setItem(SESSION_STARTED_KEY, 'true');
-    sessionStartTime = Date.now();
-    lastActivityTime = Date.now();
+    safeSet(sessionStorage, SESSION_STARTED_KEY, 'true');
+    sessionStartTime = nowMs();
 
     startDurationHeartbeat();
     return true;
   } catch (error) {
-    console.error('[ANALYTICS] Erro ao iniciar sessão:', error);
+    handleAnalyticsError('Erro ao iniciar sessão (catch)', error);
     return false;
   }
 }
@@ -257,28 +370,31 @@ function startDurationHeartbeat() {
   if (durationUpdateInterval) clearInterval(durationUpdateInterval);
 
   durationUpdateInterval = setInterval(() => {
-    if (document.visibilityState === 'visible') updateSessionDuration();
-  }, 5000);
+    if (!shouldRunAnalytics()) return;
+    if (!navigator.onLine) return;
+    if (document.visibilityState !== 'visible') return;
+    void updateSessionDuration();
+  }, HEARTBEAT_MS);
 
   window.addEventListener('beforeunload', () => {
-    updateSessionDuration();
+    void updateSessionDuration();
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      lastActivityTime = Date.now();
-    } else {
-      updateSessionDuration();
+    if (document.visibilityState !== 'visible') {
+      void updateSessionDuration();
     }
   });
 }
 
 async function updateSessionDuration() {
   try {
-    if (!sessionStartTime || !lastActivityTime) return;
+    if (!shouldRunAnalytics()) return;
+    if (!navigator.onLine) return;
+    if (!sessionStartTime) return;
 
     const sessionId = getSessionId();
-    const durationSeconds = Math.floor((Date.now() - sessionStartTime) / 1000);
+    const durationSeconds = Math.floor((nowMs() - sessionStartTime) / 1000);
 
     const { error } = await supabase
       .from('analytics_sessions')
@@ -289,10 +405,10 @@ async function updateSessionDuration() {
       .eq('session_id', sessionId);
 
     if (error && !isConflictError(error)) {
-      console.error('[ANALYTICS] Erro ao atualizar duração:', error);
+      handleAnalyticsError('Erro ao atualizar duração', error);
     }
   } catch (e) {
-    console.error('[ANALYTICS] Erro ao atualizar duração (catch):', e);
+    handleAnalyticsError('Erro ao atualizar duração (catch)', e);
   }
 }
 
@@ -304,19 +420,21 @@ const trackedPages = new Set<string>();
 
 export async function trackPageView(path: string, title: string): Promise<boolean> {
   try {
+    if (!shouldRunAnalytics()) return false;
+    if (!navigator.onLine) return false;
+
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
 
     const pageKey = `${sessionId}-${path}`;
     if (trackedPages.has(pageKey)) return true;
 
-    // Upsert pra evitar 409 (conflito/duplicado)
+    // IMPORTANTE:
+    // Não força "id" no upsert. Isso quebra se sua tabela não tiver id uuid ou tiver trigger/default.
     const { error } = await supabase
       .from('analytics_pageviews')
       .upsert(
         {
-          // Se sua tabela tiver "id" uuid, ótimo. Se não tiver, remove este campo.
-          id: safeUUID(),
           session_id: sessionId,
           visitor_id: visitorId,
           page_path: path,
@@ -329,28 +447,27 @@ export async function trackPageView(path: string, title: string): Promise<boolea
         }
       );
 
-    if (error) {
-      // conflito = ok
-      if (!isConflictError(error)) {
-        console.error('[ANALYTICS] Erro ao rastrear pageview:', error);
-        return false;
-      }
+    if (error && !isConflictError(error)) {
+      handleAnalyticsError('Erro ao rastrear pageview', error);
+      return false;
     }
 
     trackedPages.add(pageKey);
 
-    // Increment page_count (se existir RPC). Se falhar, não derruba app.
+    // RPC opcional — se não existir, vai falhar, mas não derruba e não spamma
     const { error: updateError } = await supabase.rpc('increment_page_count', {
       p_session_id: sessionId,
     });
 
     if (updateError && !isConflictError(updateError)) {
-      console.error('[ANALYTICS] Erro ao incrementar page_count:', updateError);
+      // não desliga 24h por erro de RPC; só por alguns minutos pra reduzir spam
+      if (isNetworkError(updateError)) disableAnalyticsForMinutes(DISABLE_ON_NETWORK_MINUTES);
+      logOncePer10s('[ANALYTICS] increment_page_count falhou (ok ignorar):', updateError);
     }
 
     return true;
   } catch (error) {
-    console.error('[ANALYTICS] Erro ao rastrear pageview (catch):', error);
+    handleAnalyticsError('Erro ao rastrear pageview (catch)', error);
     return false;
   }
 }
@@ -363,6 +480,9 @@ const trackedEvents = new Set<string>();
 
 export async function trackEvent(eventType: string, eventLabel?: string, pagePath?: string): Promise<boolean> {
   try {
+    if (!shouldRunAnalytics()) return false;
+    if (!navigator.onLine) return false;
+
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
 
@@ -378,22 +498,32 @@ export async function trackEvent(eventType: string, eventLabel?: string, pagePat
     });
 
     if (error && !isConflictError(error)) {
-      console.error('[ANALYTICS] Erro ao rastrear evento:', error);
+      handleAnalyticsError('Erro ao rastrear evento', error);
       return false;
     }
 
     trackedEvents.add(eventKey);
     return true;
   } catch (error) {
-    console.error('[ANALYTICS] Erro ao rastrear evento (catch):', error);
+    handleAnalyticsError('Erro ao rastrear evento (catch)', error);
     return false;
   }
 }
 
+// ============================================
+// CLICK TRACKING (não duplica listener)
+// ============================================
+
 export function setupClickTracking() {
+  const KEY = '__analytics_click_tracking_attached__';
+  if ((window as any)[KEY]) return;
+  (window as any)[KEY] = true;
+
   document.addEventListener('click', (e) => {
+    if (!shouldRunAnalytics()) return;
+
     const target = e.target as HTMLElement;
-    const clickable = target.closest('a, button, [role="button"], [onclick]');
+    const clickable = target?.closest?.('a, button, [role="button"], [onclick]') as HTMLElement | null;
     if (!clickable) return;
 
     const href = clickable.getAttribute('href') || '';
@@ -412,11 +542,22 @@ export function setupClickTracking() {
       allText.includes('whatsapp') ||
       allText.includes('zap')
     ) {
-      trackEvent('whatsapp_click', 'WhatsApp Contact');
-    } else if (href.startsWith('tel:') || dataEvent === 'phone_click' || allText.includes('ligar') || allText.includes('telefone') || allText.includes('phone')) {
-      trackEvent('phone_click', 'Phone Contact');
-    } else if (href.startsWith('mailto:') || dataEvent === 'email_click' || allText.includes('email') || allText.includes('e-mail')) {
-      trackEvent('email_click', 'Email Contact');
+      void trackEvent('whatsapp_click', 'WhatsApp Contact');
+    } else if (
+      href.startsWith('tel:') ||
+      dataEvent === 'phone_click' ||
+      allText.includes('ligar') ||
+      allText.includes('telefone') ||
+      allText.includes('phone')
+    ) {
+      void trackEvent('phone_click', 'Phone Contact');
+    } else if (
+      href.startsWith('mailto:') ||
+      dataEvent === 'email_click' ||
+      allText.includes('email') ||
+      allText.includes('e-mail')
+    ) {
+      void trackEvent('email_click', 'Email Contact');
     } else if (
       href.includes('instagram.com') ||
       href.includes('instagr.am') ||
@@ -424,9 +565,14 @@ export function setupClickTracking() {
       allText.includes('instagram') ||
       allText.includes('insta')
     ) {
-      trackEvent('instagram_click', 'Instagram Profile');
-    } else if (href.includes('facebook.com') || href.includes('fb.com') || dataEvent === 'facebook_click' || allText.includes('facebook')) {
-      trackEvent('facebook_click', 'Facebook Profile');
+      void trackEvent('instagram_click', 'Instagram Profile');
+    } else if (
+      href.includes('facebook.com') ||
+      href.includes('fb.com') ||
+      dataEvent === 'facebook_click' ||
+      allText.includes('facebook')
+    ) {
+      void trackEvent('facebook_click', 'Facebook Profile');
     } else if (
       dataEvent === 'budget_click' ||
       allText.includes('orçamento') ||
@@ -437,7 +583,7 @@ export function setupClickTracking() {
       allText.includes('budget') ||
       allText.includes('quote')
     ) {
-      trackEvent('budget_click', 'Budget Request');
+      void trackEvent('budget_click', 'Budget Request');
     } else if (
       href.includes('/login') ||
       href.includes('/client') ||
@@ -446,7 +592,7 @@ export function setupClickTracking() {
       allText.includes('área do cliente') ||
       allText.includes('minha conta')
     ) {
-      trackEvent('login_click', 'Login Access');
+      void trackEvent('login_click', 'Login Access');
     }
   });
 }
