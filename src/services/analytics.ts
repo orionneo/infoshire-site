@@ -18,6 +18,9 @@ const DISABLE_ON_NETWORK_MINUTES = 10; // 10 min
 // Heartbeat agressivo causa spam e lag; 15s é muito mais seguro
 const HEARTBEAT_MS = 15000;
 
+// ✅ Fallback em memória (quando Tracking Prevention bloqueia storage)
+let __memDisabledUntil = 0;
+
 // ============================================
 // SAFE STORAGE (Tracking Prevention / iOS / Private mode)
 // ============================================
@@ -46,16 +49,30 @@ function nowMs(): number {
 
 function disableAnalyticsForMinutes(minutes: number) {
   const until = nowMs() + minutes * 60 * 1000;
+
+  // ✅ Sempre mantém um fallback em memória (caso o browser bloqueie storage)
+  __memDisabledUntil = Math.max(__memDisabledUntil, until);
+
   // tenta sessionStorage primeiro (menos bloqueado), depois localStorage
   safeSet(sessionStorage, DISABLE_KEY, String(until));
   safeSet(localStorage, DISABLE_KEY, String(until));
 }
 
 function isAnalyticsDisabled(): boolean {
+  // ✅ Primeiro: fallback em memória (funciona mesmo com Tracking Prevention)
+  const memUntil = __memDisabledUntil;
+
   const v = safeGet(sessionStorage, DISABLE_KEY) || safeGet(localStorage, DISABLE_KEY);
-  if (!v) return false;
-  const until = Number(v);
-  if (!Number.isFinite(until)) return false;
+  const storageUntil = v ? Number(v) : 0;
+
+  const until = Math.max(
+    Number.isFinite(memUntil) ? memUntil : 0,
+    Number.isFinite(storageUntil) ? storageUntil : 0
+  );
+
+  // mantém memória em sync (se storage tiver valor maior)
+  if (until > __memDisabledUntil) __memDisabledUntil = until;
+
   return nowMs() < until;
 }
 
@@ -422,6 +439,10 @@ export async function trackPageView(path: string, title: string): Promise<boolea
   try {
     if (!shouldRunAnalytics()) return false;
     if (!navigator.onLine) return false;
+
+    // ✅ Se o backend exige auth (RLS/policy), não tente rastrear sem sessão (evita 401 no console)
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData?.session) return false;
 
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
