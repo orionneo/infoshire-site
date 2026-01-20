@@ -1,5 +1,10 @@
 // src/utils/offlineDb.ts
-export type OfflineTaskType = 'CREATE_MESSAGE' | 'UPLOAD_IMAGE';
+
+export type OfflineTaskType =
+  | 'CREATE_MESSAGE'
+  | 'UPLOAD_ORDER_IMAGE'
+  | 'UPLOAD_MESSAGE_IMAGE'
+  | 'CREATE_SERVICE_ORDER';
 
 export type OfflineTask =
   | {
@@ -16,7 +21,7 @@ export type OfflineTask =
     }
   | {
       id: string;
-      type: 'UPLOAD_IMAGE';
+      type: 'UPLOAD_ORDER_IMAGE';
       createdAt: number;
       retries: number;
       payload: {
@@ -24,7 +29,43 @@ export type OfflineTask =
         description?: string;
         fileName: string;
         mimeType: string;
-        // O Blob vai separado no store "blobs"
+        // blob fica no store "blobs" (por taskId)
+      };
+    }
+  | {
+      id: string;
+      type: 'UPLOAD_MESSAGE_IMAGE';
+      createdAt: number;
+      retries: number;
+      payload: {
+        order_id: string;
+        sender_id: string;
+        fileName: string;
+        mimeType: string;
+        content?: string; // default: "[Imagem]"
+      };
+    }
+  | {
+      id: string;
+      type: 'CREATE_SERVICE_ORDER';
+      createdAt: number;
+      retries: number;
+      payload: {
+        // ✅ id gerado no client; vamos inserir no Supabase com esse id
+        id: string;
+        client_id: string;
+        equipment: string;
+        serial_number?: string;
+        entry_date?: string;
+        equipment_photo_url?: string | null;
+        problem_description: string;
+        estimated_completion?: string;
+        has_multiple_items?: boolean;
+        items?: Array<{
+          equipment: string;
+          serial_number?: string;
+          description?: string;
+        }>;
       };
     };
 
@@ -96,13 +137,11 @@ export async function dbDeleteTask(taskId: string): Promise<void> {
 
 export async function dbUpdateTaskRetries(taskId: string, retries: number): Promise<void> {
   const db = await openDb();
-
   const task = await tx<OfflineTask | undefined>(db, STORE_TASKS, 'readonly', (store) => store.get(taskId));
   if (task) {
     const updated = { ...task, retries };
     await tx(db, STORE_TASKS, 'readwrite', (store) => store.put(updated));
   }
-
   db.close();
 }
 
