@@ -62,14 +62,20 @@ export default defineConfig(({ mode }) => {
         cleanupOutdatedCaches: true,
         skipWaiting: true,
         clientsClaim: true,
+
         runtimeCaching: [
+          /**
+           * ✅ CRÍTICO (PWA/iOS): NÃO cachear Supabase.
+           * Caching de API (NetworkFirst/StaleWhileRevalidate) causa intermitência, status 0 (opaque),
+           * responses velhas e timeouts em background.
+           *
+           * NetworkOnly = sempre rede, sem cache.
+           */
           {
             urlPattern: /^https:\/\/.*\.supabase\.co\/.*/i,
-            handler: 'NetworkFirst',
+            handler: 'NetworkOnly',
             options: {
-              cacheName: 'supabase-cache-v75',
-              expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheName: 'supabase-network-only',
             },
           },
         ],
