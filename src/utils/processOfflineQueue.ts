@@ -122,11 +122,15 @@ async function processCreateServiceOrder(task: Extract<OfflineTask, { type: 'CRE
   if (insErr) throw insErr;
 
   // 3) histórico inicial
+  const { data: userRes, error: userErr } = await supabase.auth.getUser();
+  if (userErr) throw userErr;
+  const createdBy = userRes.user?.id ?? o.client_id;
+
   const { error: histErr } = await supabase.from('order_status_history').insert({
     order_id: o.id,
     status: 'received',
     notes: 'Ordem de serviço criada',
-    created_by: o.client_id,
+    created_by: createdBy,
   });
   if (histErr) throw histErr;
 
