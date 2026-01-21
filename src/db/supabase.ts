@@ -1,23 +1,51 @@
 import { createClient } from '@supabase/supabase-js';
 
-// ✅ Lock em memória (fila) compatível com LockFunc: (key, acquireTimeout, fn)
+// ================================
+// 🔒 Memory Lock com timeout SAFE
+// Evita travamento eterno (Safari / PWA / background)
+// ================================
+
 let __lockQueue: Promise<any> = Promise.resolve();
 
-const memoryLock = async (_key: string, _acquireTimeout: number, fn: () => Promise<any>) => {
-  const run = __lockQueue.then(fn, fn);
+/**
+ * Lock em memória compatível com Supabase LockFunc
+ * NUNCA deixa a fila travar indefinidamente
+ */
+export const memoryLock = async (
+  _key: string,
+  acquireTimeout: number,
+  fn: () => Promise<any>
+) => {
+  const timeoutMs = Math.max(5000, Number(acquireTimeout || 15000));
+
+  const runFnWithTimeout = () =>
+    Promise.race([
+      fn(),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`memoryLock timeout after ${timeoutMs}ms`)),
+          timeoutMs
+        )
+      ),
+    ]);
+
+  const run = __lockQueue.then(runFnWithTimeout, runFnWithTimeout);
+
+  // ✅ LIBERA A FILA SEMPRE (SUCESSO, ERRO OU TIMEOUT)
   __lockQueue = run.then(
     () => undefined,
     () => undefined
   );
+
   return run;
 };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string;
 
-// ⚠️ Não derrube o build inteiro — loga e segue (você pode preferir throw em DEV)
+// ✅ Melhor quebrar cedo do que virar "loading eterno"
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.error('❌ Missing Supabase env vars: VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY');
+  throw new Error('Missing Supabase env vars: VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY');
 }
 
 // ✅ Storage “de sessão”: mantém enquanto app/aba existe; ao fechar, some (exige login)
@@ -29,7 +57,7 @@ function getSessionStorageOrMemory(): Storage {
     s.removeItem(k);
     return s;
   } catch {
-    // fallback: memory (ainda mais “seguro” porque não persiste em refresh)
+    // fallback: memory (não persiste em refresh)
     const mem = new Map<string, string>();
     return {
       get length() {
@@ -54,13 +82,16 @@ function getSessionStorageOrMemory(): Storage {
   }
 }
 
-
 // =======================================
 // ✅ fetch com timeout (evita spinner infinito no PWA)
 // =======================================
 const DEFAULT_FETCH_TIMEOUT_MS = 30000;
 
-function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS) {
+function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs: number = DEFAULT_FETCH_TIMEOUT_MS
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -79,10 +110,11 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit, timeoutM
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-
   auth: {
-    // ✅ GitHub Pages + HashRouter: ok
+    // ✅ OAuth Google + GitHub Pages + HashRouter (#)
+    // Mantém implicit + detectSessionInUrl, pois o callback pode cair com hash.
     flowType: 'implicit',
+    detectSessionInUrl: true,
 
     // 🔥 PWA FIX:
     // - NÃO tenta refresh no background (evita travar quando minimiza)
@@ -90,7 +122,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: false,
 
     persistSession: true,
-    detectSessionInUrl: true,
 
     // 🔥 “fechou o PWA/aba -> reloga”
     storage: typeof window !== 'undefined' ? getSessionStorageOrMemory() : undefined,
@@ -132,8 +163,6 @@ async function safeRefreshIfNeeded() {
 }
 
 // ✅ Mantém sessão viva enquanto app está ABERTO e VISÍVEL (especialmente admin).
-// - Não roda quando está escondido (evita bug/timeout mobile/PWA)
-// - Ao fechar app/aba: sessionStorage some -> reloga (ok)
 let refreshTimer: number | null = null;
 
 function startVisibleRefreshLoop() {
@@ -142,7 +171,7 @@ function startVisibleRefreshLoop() {
     if (document.visibilityState === 'visible') {
       void safeRefreshIfNeeded();
     }
-  }, 60000); // ✅ 60s (sem numeric separator pra não quebrar esprima)
+  }, 60000);
 }
 
 function stopVisibleRefreshLoop() {
@@ -153,7 +182,7 @@ function stopVisibleRefreshLoop() {
 }
 
 function setupRefreshListeners() {
-  // Quando volta pro app/aba, garante refresh sem “timeout”
+  // Quando volta pro app/aba, garante refresh
   window.addEventListener('focus', () => {
     void safeRefreshIfNeeded();
   });
@@ -173,7 +202,17 @@ function setupRefreshListeners() {
   });
 }
 
-// ✅ Só registra listeners no browser
+// ✅ HMR/DEV GUARD: evita duplicar listeners/intervalos no Vite dev
+declare global {
+  interface Window {
+    __INFOSHIRE_SUPABASE_REFRESH_BOUND__?: boolean;
+  }
+}
+
+// ✅ Só registra listeners no browser (e só 1x mesmo com HMR)
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  setupRefreshListeners();
+  if (!window.__INFOSHIRE_SUPABASE_REFRESH_BOUND__) {
+    window.__INFOSHIRE_SUPABASE_REFRESH_BOUND__ = true;
+    setupRefreshListeners();
+  }
 }

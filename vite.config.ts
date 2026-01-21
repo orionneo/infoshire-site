@@ -32,9 +32,20 @@ export default defineConfig(({ mode }) => {
         namedExport: 'ReactComponent',
       },
     }),
+
+    /**
+     * ✅ PWA estável para iOS/Safari + Web:
+     * - NUNCA "autoUpdate" em produção (causa travamentos/spinners em sessão ativa)
+     * - NUNCA skipWaiting/clientsClaim em produção (sequestra a aba/PWA e quebra requests)
+     * - start_url SEM "#/" (iOS frequentemente reabre sem hash; HashRouter resolve no runtime)
+     */
     VitePWA({
-      registerType: 'autoUpdate',
+      // 🚫 Evita troca de SW no meio da sessão
+      registerType: 'prompt',
+      injectRegister: 'auto',
+
       includeAssets: ['favicon.png'],
+
       manifest: {
         name: 'InfoShire - Assistência Técnica',
         short_name: 'InfoShire',
@@ -46,10 +57,13 @@ export default defineConfig(({ mode }) => {
         lang: 'pt-BR',
         orientation: 'portrait',
 
-// ✅ PWA + HashRouter: start_url precisa incluir "#/" senão abre sem hash
+        // ✅ Para GH Pages e domínio:
+        // scope precisa ser o base do app
         scope: normalizedBase,
-        start_url: `${normalizedBase}#/`,
 
+        // ✅ iOS/PWA: sem "#/" para não abrir "sem hash e quebrar"
+        // O HashRouter cuida do resto depois que o index carrega
+        start_url: normalizedBase,
 
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
@@ -58,19 +72,19 @@ export default defineConfig(({ mode }) => {
           { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
+
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         cleanupOutdatedCaches: true,
-        skipWaiting: true,
-        clientsClaim: true,
+
+        // 🚫 CRÍTICO: NÃO assumir controle de sessão ativa
+        skipWaiting: false,
+        clientsClaim: false,
 
         runtimeCaching: [
           /**
            * ✅ CRÍTICO (PWA/iOS): NÃO cachear Supabase.
-           * Caching de API (NetworkFirst/StaleWhileRevalidate) causa intermitência, status 0 (opaque),
-           * responses velhas e timeouts em background.
-           *
            * NetworkOnly = sempre rede, sem cache.
            */
           {
@@ -82,8 +96,12 @@ export default defineConfig(({ mode }) => {
           },
         ],
       },
+
+      // Dev: pode deixar ligado para testar SW localmente.
+      // Em produção isso não afeta.
       devOptions: { enabled: true },
     }),
+
     miaodaDevPlugin(),
   ];
 
