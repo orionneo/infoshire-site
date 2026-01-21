@@ -1,6 +1,27 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
   <head>
+  <!-- HASHROUTER_COMPAT_REDIRECT: permite links diretos (ex /approve/...) em GitHub Pages -->
+  <script>
+    (function () {
+      try {
+        var p = window.location.pathname || "";
+        // Ajuste aqui se você usar subpasta; em domínio raiz é só isso:
+        if (p.startsWith("/approve/")) {
+          var token = p.slice("/approve/".length);
+          var target = window.location.origin + "/#/approve/" + token + window.location.search;
+          window.location.replace(target);
+          return;
+        }
+        // (Opcional) se algum link antigo /login vier sem hash
+        if (p === "/login") {
+          window.location.replace(window.location.origin + "/#/login" + window.location.search);
+          return;
+        }
+      } catch (e) {}
+    })();
+  </script>
+
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#000000" />
