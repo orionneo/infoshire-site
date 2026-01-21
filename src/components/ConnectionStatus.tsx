@@ -12,22 +12,26 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 type Props = {
   enabled?: boolean;
   showPending?: boolean; // se true, tenta mostrar contador de pendências
+  failThreshold?: number; // ✅ novo
 };
 
-export function ConnectionStatus({ enabled = true, showPending = true }: Props) {
+export function ConnectionStatus({ enabled = true, showPending = true, failThreshold = 3}: Props) {
   const [isOnline, setIsOnline] = useState<boolean>(() => (typeof navigator !== 'undefined' ? navigator.onLine : true));
   const [pending, setPending] = useState<number>(0);
   const [syncing, setSyncing] = useState<boolean>(false);
 
   const timerRef = useRef<number | null>(null);
 
-  const hasIssues = useMemo(() => {
-    // só mostra se offline ou se tem pendências (opcional)
-    if (!enabled) return false;
-    if (!isOnline) return true;
-    if (showPending && pending > 0) return true;
-    return false;
-  }, [enabled, isOnline, showPending, pending]);
+const hasIssues = useMemo(() => {
+  if (!enabled) return false;
+  if (!isOnline) return true;
+
+  if (showPending) {
+    return pending >= failThreshold;
+  }
+
+  return false;
+}, [enabled, isOnline, showPending, pending, failThreshold]);
 
   const refreshPendingBestEffort = async () => {
     if (!showPending) return;

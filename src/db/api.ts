@@ -3,23 +3,21 @@ import type {
   EmailConfig,
   Message,
   MessageWithSender,
-  OrderImage,
-  OrderImageWithUploader,
   OrderStatus,
   OrderStatusHistory,
   OrderStatusHistoryWithUser,
   PopupConfig,
   Profile,
-  PublicOrderInfo,
   ServiceOrder,
   ServiceOrderItem,
   ServiceOrderWithClient,
   SiteSetting,
 } from '@/types/types';
 import { supabase } from './supabase';
+import { getOrderImagesBucket } from '@/db/storage';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { addOfflineTask } from '@/utils/offlineQueue';
+import { addOfflineTask, attachBlob, isOnlineNow } from '@/utils/offlineQueue';
 import { v4 as uuid } from 'uuid';
 
 
@@ -46,6 +44,25 @@ function handleApiError(error: any, context: string): never {
   
   // Erro genérico
   throw new Error(error.message || 'Erro ao processar requisição');
+}
+
+
+// ================================
+// ⏱️ Timeout helper (evita "loading infinito" no PWA)
+// Aceita PromiseLike porque Supabase PostgrestBuilder é "thenable"
+// ================================
+async function withTimeout<T>(promiseLike: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  let t: any;
+  const timeout = new Promise<T>((_, reject) => {
+    t = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
+  });
+
+  try {
+    // Promise.resolve normaliza builders do Supabase (PromiseLike)
+    return await Promise.race([Promise.resolve(promiseLike), timeout]);
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 // Profiles
@@ -177,47 +194,168 @@ export async function createServiceOrder(order: {
     description?: string;
   }>;
 }): Promise<ServiceOrder> {
-  // Generate order number
-  const { data: orderNumber, error: numberError } = await supabase
-    .rpc('generate_order_number');
+  // ✅ Sempre gera ID no client: permite idempotência e fallback offline
+  const id = uuid();
 
-  if (numberError) throw numberError;
+  // Se estiver offline (ou conexão "fake online"), já enfileira para sincronizar depois.
+  if (!isOnlineNow()) {
+    await addOfflineTask({
+      type: 'CREATE_SERVICE_ORDER',
+      payload: {
+        id,
+        client_id: order.client_id,
+        equipment: order.equipment,
+        serial_number: order.serial_number ?? undefined,
+        entry_date: order.entry_date || new Date().toISOString(),
+        equipment_photo_url: order.equipment_photo_url ?? null,
+        problem_description: order.problem_description,
+        // ✅ string | undefined (evita erro de tipo)
+        estimated_completion: order.estimated_completion ?? undefined,
+        has_multiple_items: order.has_multiple_items || false,
+        items: order.items?.map((it) => ({
+          equipment: it.equipment,
+          serial_number: it.serial_number ?? undefined,
+          description: it.description ?? undefined,
+        })) ?? [],
+      },
+    });
 
-  const { data, error } = await supabase
-    .from('service_orders')
-    .insert({
+    // Retorno otimista: UI segue e a fila sincroniza depois
+    return {
+      id,
+      order_number: 'PENDENTE (OFFLINE)',
       client_id: order.client_id,
       equipment: order.equipment,
-      serial_number: order.serial_number,
+      serial_number: order.serial_number ?? undefined,
       entry_date: order.entry_date || new Date().toISOString(),
-      equipment_photo_url: order.equipment_photo_url,
+      equipment_photo_url: order.equipment_photo_url ?? null,
       problem_description: order.problem_description,
-      estimated_completion: order.estimated_completion,
-      has_multiple_items: order.has_multiple_items || false,
-      order_number: orderNumber,
-    })
-    .select()
-    .single();
-
-  if (error) throw error;
-// Create initial status history
-const { data: userRes, error: userErr } = await supabase.auth.getUser();
-if (userErr) throw userErr;
-const createdBy = userRes.user?.id ?? order.client_id;
-
-await createOrderStatusHistory({
-  order_id: data.id,
-  status: 'received',
-  notes: 'Ordem de serviço criada',
-  created_by: createdBy,
-});
-  // Create additional items if provided
-  if (order.items && order.items.length > 0) {
-    await createServiceOrderItems(data.id, order.items);
+      status: 'received',
+      estimated_completion: order.estimated_completion ?? null,
+      completed_at: null,
+      labor_cost: null,
+      parts_cost: null,
+      total_cost: null,
+      budget_approved: false,
+      approved_at: null,
+      approval_token: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as ServiceOrder;
   }
 
-  return data;
+  try {
+    // 1) Número da OS (online-only) — com timeout hard (evita spinner infinito)
+    const { data: orderNumber, error: numberError } = await withTimeout(
+      supabase.rpc('generate_order_number'),
+      20000,
+      'generate_order_number'
+    );
+    if (numberError) throw numberError;
+
+    // 2) Cria OS com ID gerado no client (idempotente)
+    const { data, error } = await withTimeout(
+      supabase
+        .from('service_orders')
+        .insert({
+          id,
+          client_id: order.client_id,
+          equipment: order.equipment,
+          serial_number: order.serial_number,
+          entry_date: order.entry_date || new Date().toISOString(),
+          equipment_photo_url: order.equipment_photo_url,
+          problem_description: order.problem_description,
+          estimated_completion: order.estimated_completion,
+          has_multiple_items: order.has_multiple_items || false,
+          order_number: orderNumber,
+        })
+        .select()
+        .single(),
+      20000,
+      'insert service_orders'
+    );
+    if (error) throw error;
+
+    // 3) Histórico inicial
+    const { data: userRes, error: userErr } = await withTimeout(
+      supabase.auth.getUser(),
+      15000,
+      'auth.getUser'
+    );
+    if (userErr) throw userErr;
+
+    const createdBy = userRes.user?.id ?? order.client_id;
+
+    await withTimeout(
+      createOrderStatusHistory({
+        order_id: data.id,
+        status: 'received',
+        notes: 'Ordem de serviço criada',
+        created_by: createdBy,
+      }),
+      15000,
+      'createOrderStatusHistory'
+    );
+
+    // 4) Itens adicionais
+    if (order.items && order.items.length > 0) {
+      await withTimeout(
+        createServiceOrderItems(data.id, order.items),
+        20000,
+        'createServiceOrderItems'
+      );
+    }
+
+    return data;
+  } catch (err: any) {
+    // ✅ Se travar/rede ruim, cai no offline (não deixa a UI eternamente em "Criando...")
+    console.warn('⚠️ createServiceOrder falhou — salvando offline:', err);
+
+    await addOfflineTask({
+      type: 'CREATE_SERVICE_ORDER',
+      payload: {
+        id,
+        client_id: order.client_id,
+        equipment: order.equipment,
+        serial_number: order.serial_number ?? undefined,
+        entry_date: order.entry_date || new Date().toISOString(),
+        equipment_photo_url: order.equipment_photo_url ?? null,
+        problem_description: order.problem_description,
+        // ✅ string | undefined
+        estimated_completion: order.estimated_completion ?? undefined,
+        has_multiple_items: order.has_multiple_items || false,
+        items: order.items?.map((it) => ({
+          equipment: it.equipment,
+          serial_number: it.serial_number ?? undefined,
+          description: it.description ?? undefined,
+        })) ?? [],
+      },
+    });
+
+    return {
+      id,
+      order_number: 'PENDENTE (SINCRONIZANDO)',
+      client_id: order.client_id,
+      equipment: order.equipment,
+      serial_number: order.serial_number ?? undefined,
+      entry_date: order.entry_date || new Date().toISOString(),
+      equipment_photo_url: order.equipment_photo_url ?? null,
+      problem_description: order.problem_description,
+      status: 'received',
+      estimated_completion: order.estimated_completion ?? null,
+      completed_at: null,
+      labor_cost: null,
+      parts_cost: null,
+      total_cost: null,
+      budget_approved: false,
+      approved_at: null,
+      approval_token: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as ServiceOrder;
+  }
 }
+
 
 export async function updateServiceOrder(
   id: string,
@@ -438,17 +576,14 @@ export async function createMessage(message: {
   } catch (error) {
     console.warn('⚠️ Mensagem salva offline:', error);
 
-    addOfflineTask({
-      id: uuid(),
+    const taskId = await addOfflineTask({
       type: 'CREATE_MESSAGE',
       payload: message,
-      createdAt: Date.now(),
-      retries: 0,
     });
 
     // Retorno otimista (UI não quebra)
     return {
-      id: `offline-${Date.now()}`,
+      id: `offline-${taskId}`,
       ...message,
       created_at: new Date().toISOString(),
     } as Message;
@@ -780,62 +915,96 @@ export async function uploadOrderImage(
   description?: string
 ): Promise<{ image_url: string; id: string }> {
   console.log('📤 Iniciando upload de imagem:', { orderId, fileName: file.name, fileSize: file.size });
-  
-  // Compress image if needed
+
   const compressedFile = await compressImage(file);
   console.log('✅ Imagem comprimida:', { originalSize: file.size, compressedSize: compressedFile.size });
-  
-  // Generate unique filename
+
   const fileExt = compressedFile.name.split('.').pop();
   const fileName = `${orderId}_${Date.now()}.${fileExt}`;
   const filePath = `${fileName}`;
-  console.log('📝 Nome do arquivo gerado:', filePath);
 
-  // Upload to storage
-  const { data: uploadData, error: uploadError } = await supabase.storage
-    .from('app-8pj0bpgfx6v5_order_images')
-    .upload(filePath, compressedFile, {
-      cacheControl: '3600',
-      upsert: false,
+  // ✅ Offline / conexão ruim: não trava a UI — enfileira para sync
+  if (!isOnlineNow()) {
+    const taskId = await addOfflineTask({
+      type: 'UPLOAD_ORDER_IMAGE',
+      payload: {
+        orderId,
+        description: description ?? undefined,
+        fileName,
+        mimeType: compressedFile.type || file.type || 'application/octet-stream',
+      },
     });
 
-  if (uploadError) {
-    console.error('❌ Erro no upload para storage:', uploadError);
-    throw uploadError;
+    await attachBlob(taskId, compressedFile);
+
+    const localUrl = URL.createObjectURL(compressedFile);
+    return { id: `offline-${taskId}`, image_url: localUrl };
   }
-  console.log('✅ Upload para storage concluído:', uploadData);
 
-  // Get public URL
-  const { data: urlData } = supabase.storage
-    .from('app-8pj0bpgfx6v5_order_images')
-    .getPublicUrl(uploadData.path);
+  const bucket = getOrderImagesBucket();
 
-  const imageUrl = urlData.publicUrl;
-  console.log('🔗 URL pública gerada:', imageUrl);
+  try {
+    const { data: uploadData, error: uploadError } = await withTimeout(
+      supabase.storage.from(bucket).upload(filePath, compressedFile, {
+        cacheControl: '3600',
+        upsert: false,
+      }),
+      20000,
+      'storage.upload(order_image)'
+    );
 
-  // Save to database
-  const { data: user } = await supabase.auth.getUser();
-  if (!user.user) throw new Error('Usuário não autenticado');
+    if (uploadError) throw uploadError;
 
-  const { data, error } = await supabase
-    .from('order_images')
-    .insert({
-      order_id: orderId,
-      image_url: imageUrl,
-      description: description || null,
-      uploaded_by: user.user.id,
-    })
-    .select()
-    .single();
+    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(uploadData.path);
+    const imageUrl = urlData.publicUrl;
 
-  if (error) {
-    console.error('❌ Erro ao salvar no banco de dados:', error);
-    throw error;
+    const { data: userRes, error: userErr } = await withTimeout(
+      supabase.auth.getUser(),
+      15000,
+      'auth.getUser(order_image)'
+    );
+    if (userErr) throw userErr;
+    if (!userRes.user) throw new Error('Usuário não autenticado');
+
+    const { data, error } = await withTimeout(
+      supabase
+        .from('order_images')
+        .insert({
+          order_id: orderId,
+          image_url: imageUrl,
+          description: description || null,
+          uploaded_by: userRes.user.id,
+        })
+        .select()
+        .single(),
+      20000,
+      'insert order_images'
+    );
+
+    if (error) throw error;
+
+    console.log('✅ Upload de imagem concluído:', data);
+    return { image_url: imageUrl, id: data.id };
+  } catch (e) {
+    console.warn('⚠️ uploadOrderImage falhou — salvando offline:', e);
+
+    const taskId = await addOfflineTask({
+      type: 'UPLOAD_ORDER_IMAGE',
+      payload: {
+        orderId,
+        description: description ?? undefined,
+        fileName,
+        mimeType: compressedFile.type || file.type || 'application/octet-stream',
+      },
+    });
+
+    await attachBlob(taskId, compressedFile);
+
+    const localUrl = URL.createObjectURL(compressedFile);
+    return { id: `offline-${taskId}`, image_url: localUrl };
   }
-  
-  console.log('✅ Imagem salva no banco de dados:', data);
-  return { image_url: imageUrl, id: data.id };
 }
+
 
 export async function getOrderImages(orderId: string) {
   console.log('🖼️ Buscando imagens da ordem:', orderId);
@@ -1140,7 +1309,7 @@ export async function upsertEmailConfig(config: Partial<EmailConfig>): Promise<E
 }
 
 export async function testEmailConfig(testEmail: string): Promise<{ success: boolean; message: string }> {
-  const { data, error } = await supabase.functions.invoke('send-email', {
+  const { error } = await supabase.functions.invoke('send-email', {
     body: {
       to: testEmail,
       subject: 'Teste de Configuração de Email - InfoShire',
