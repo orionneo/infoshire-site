@@ -368,6 +368,9 @@ const handleConfirmOrder = async () => {
       clientId = newClient.id;
     }
 
+   const { wakeSupabase } = await import('@/db/supabase');
+   await wakeSupabase('before createServiceOrder (admin)');
+
   const order = await createServiceOrder(
   {
     client_id: clientId,
