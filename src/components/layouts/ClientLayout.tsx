@@ -17,7 +17,7 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
 
   const handleSignOut = async () => {
     await signOut();
-    navigate('/');
+    navigate('/#/');
   };
 
   // ✅ Inclui "Voltar ao site" no menu do cliente

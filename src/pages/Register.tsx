@@ -112,7 +112,7 @@ export default function Register() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => navigate('/')}
+              onClick={() => navigate('/#/')}
               className="neon-hover"
             >
               <ArrowLeft className="h-5 w-5" />

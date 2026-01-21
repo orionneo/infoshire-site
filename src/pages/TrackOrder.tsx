@@ -97,7 +97,7 @@ export default function TrackOrder() {
             asChild
             className="gap-2"
           >
-            <Link to="/">
+            <Link to="/#/">
               <Home className="h-4 w-4" />
               Voltar ao Site
             </Link>
@@ -118,7 +118,7 @@ export default function TrackOrder() {
           asChild
           className="gap-2"
         >
-          <Link to="/">
+          <Link to="/#/">
             <ArrowLeft className="h-4 w-4" />
             Voltar ao Site
           </Link>

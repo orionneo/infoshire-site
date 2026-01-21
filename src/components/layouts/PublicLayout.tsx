@@ -32,7 +32,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
 
   const handleSignOut = async () => {
     await signOut();
-    navigate('/');
+    navigate('/#/');
   };
 
   function firstName(full?: string | null) {
@@ -93,7 +93,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
         {/* Header */}
         <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <div className="container flex h-16 items-center justify-between">
-            <Link to="/" className="flex items-center gap-2">
+            <Link to="/#/" className="flex items-center gap-2">
               {/* Logo Image */}
               <div className="h-12 w-12 flex items-center justify-center">
                 <img
