@@ -79,7 +79,7 @@ export function SearchBar() {
       }
     } else if (result.sectionId) {
       // Se só tem sectionId, navegar para home e fazer scroll
-      navigate('/');
+      navigate('/#/');
       setTimeout(() => {
         const element = document.getElementById(result.sectionId!);
         if (element) {

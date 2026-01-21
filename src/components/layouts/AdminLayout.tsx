@@ -15,7 +15,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
 
   const handleSignOut = async () => {
     await signOut();
-    navigate('/');
+    navigate('/#/');
   };
 
   const navItems = [
@@ -99,7 +99,7 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
           <Button 
             variant="outline" 
             className="w-full justify-start" 
-            onClick={() => isMobile ? handleMobileNavigation('/') : navigate('/')}
+            onClick={() => isMobile ? handleMobileNavigation('/') : navigate('/#/')}
           >
             <Home className="h-4 w-4 mr-2" />
             Voltar ao Site
