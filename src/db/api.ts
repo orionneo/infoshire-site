@@ -186,6 +186,49 @@ type CreateServiceOrderOptions = {
   timeoutMs?: number;
 };
 
+// ============================
+// Step 3.1 helpers (module-scope)
+// ============================
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+const isTimeoutErr = (e: any) =>
+  typeof e?.message === 'string' && e.message.toLowerCase().includes('timeout');
+
+const isNetworkErr = (e: any) =>
+  e?.name === 'TypeError' ||
+  (typeof e?.message === 'string' && e.message.includes('Failed to fetch'));
+
+// ============================
+// Step 3.2: fast RPC with retry
+// ============================
+async function generateOrderNumberFast(): Promise<any> {
+  let lastErr: any = null;
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const { data, error } = await withTimeout(
+        supabase.rpc('generate_order_number'),
+        20000,
+        `generate_order_number(attempt ${attempt})`
+      );
+      if (error) throw error;
+      return data;
+    } catch (e: any) {
+      lastErr = e;
+
+      // retry só em timeout/rede
+      if (attempt < 2 && (isTimeoutErr(e) || isNetworkErr(e))) {
+        await sleep(600);
+        continue;
+      }
+
+      throw e;
+    }
+  }
+
+  throw lastErr;
+}
+
 export async function createServiceOrder(
   order: {
     client_id: string;
@@ -253,13 +296,8 @@ export async function createServiceOrder(
 
   // ✅ Função ONLINE real (igual sua lógica)
   const onlineWork = async () => {
-    // 1) Número da OS (online-only) — com timeout hard
-    const { data: orderNumber, error: numberError } = await withTimeout(
-      supabase.rpc('generate_order_number'),
-      20000,
-      'generate_order_number'
-    );
-    if (numberError) throw numberError;
+    // 1) Número da OS (online-only) — com retry inteligente
+    const orderNumber = await generateOrderNumberFast();
 
     // 2) Cria OS com ID gerado no client (idempotente)
     const { data, error } = await withTimeout(
@@ -307,7 +345,11 @@ export async function createServiceOrder(
 
     // 4) Itens adicionais
     if (order.items && order.items.length > 0) {
-      await withTimeout(createServiceOrderItems(data.id, order.items), 20000, 'createServiceOrderItems');
+      await withTimeout(
+        createServiceOrderItems(data.id, order.items),
+        20000,
+        'createServiceOrderItems'
+      );
     }
 
     return data;
@@ -317,22 +359,18 @@ export async function createServiceOrder(
   // ✅ MODO ADMIN: não usa fila offline nunca
   // =========================================================
   if (!allowOfflineQueue) {
-    // Se estiver offline, já falha direto (admin não pode "sincronizar depois")
     if (!isOnlineNow()) {
       const e: any = new Error('Sem conexão no momento (ADMIN).');
       e.code = 'ADMIN_OFFLINE';
       throw e;
     }
 
-    // Tenta online com watchdog e se falhar, ERRO REAL (não enfileira)
     return await withTimeout(onlineWork(), overallTimeoutMs, 'createServiceOrder(ADMIN overall)');
   }
 
   // =========================================================
   // ✅ MODO NORMAL (offline-first): comportamento antigo
   // =========================================================
-
-  // Se estiver offline, salva na fila e retorna otimista
   if (!isOnlineNow()) {
     await addOfflineTask({
       type: 'CREATE_SERVICE_ORDER',
@@ -343,10 +381,8 @@ export async function createServiceOrder(
   }
 
   try {
-    // Watchdog global: nunca ficar preso em “Criando...”
     return await withTimeout(onlineWork(), overallTimeoutMs, 'createServiceOrder(overall)');
   } catch (err: any) {
-    // Se travar/rede ruim, cai no offline (modo normal)
     console.warn('⚠️ createServiceOrder falhou — salvando offline:', err);
 
     await addOfflineTask({
@@ -357,9 +393,6 @@ export async function createServiceOrder(
     return buildOptimisticOrder('PENDENTE (SINCRONIZANDO)');
   }
 }
-
-
-
 
 export async function updateServiceOrder(
   id: string,

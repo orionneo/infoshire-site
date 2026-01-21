@@ -75,10 +75,41 @@ async function refreshSessionOnWake(reason: string) {
   }
 }
 
-// ✅ Export público para o autoSync "acordar" o Supabase/auth em PWA
-export async function wakeSupabase(reason: string = 'wake') {
-  await refreshSessionOnWake(reason);
+
+// =========================
+// PWA WAKE (rápido e eficiente)
+// =========================
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export async function wakeSupabase(reason = 'manual') {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
+    // 1) Sessão: só refresh se for realmente necessário
+    const { data } = await supabase.auth.getSession();
+    const session = data.session;
+    if (session?.expires_at) {
+      const expiresAtMs = session.expires_at * 1000;
+      if (expiresAtMs - Date.now() < 60 * 1000) {
+        await supabase.auth.refreshSession();
+      }
+    }
+
+    // 2) Ping curtíssimo para “acordar” rede/conexão
+    // (timeout baixo para não “prender” o fluxo)
+    await Promise.race([
+      supabase.from('profiles').select('id').limit(1),
+      sleep(2500).then(() => {
+        throw new Error('wakeSupabase timeout');
+      }),
+    ]);
+
+    console.log('✅ wakeSupabase ok:', reason);
+  } catch (e) {
+    console.warn('⚠️ wakeSupabase falhou:', reason, e);
+  }
 }
+
 
 if (typeof window !== 'undefined') {
   window.addEventListener('focus', () => void refreshSessionOnWake('focus'));
