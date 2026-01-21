@@ -347,7 +347,7 @@ export default function BudgetApproval() {
               {order.client?.phone && (
                 <div>
                   <p className="text-sm text-muted-foreground">Telefone</p>
-                  <p className="font-medium">{order.client.phone}</p>
+                  <p className="font-medium">{order.client?.phone}</p>
                 </div>
               )}
             </div>
