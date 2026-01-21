@@ -281,7 +281,7 @@ export default function AdminOrderDetail() {
         }
         
         // Generate approval link with NEW token
-        const approvalUrl = `${window.location.origin}/approve/${updatedOrder.approval_token}`;
+        const approvalUrl = `${window.location.origin}/#/approve/${updatedOrder.approval_token}`;
         
         // Create message in chat with budget details and approval link
         const budgetMessage = `🔔 *ORÇAMENTO DISPONÍVEL*
@@ -301,7 +301,7 @@ ${approvalUrl}
 🔐 *Dados de Acesso ao Sistema:*
 • Login: ${order.client.email}
 • Senha: 123456
-• Acesse: ${window.location.origin}/login
+• Acesse: ${window.location.origin}/#/login
 
 Após a aprovação, daremos continuidade ao reparo imediatamente! 🔧`;
 
