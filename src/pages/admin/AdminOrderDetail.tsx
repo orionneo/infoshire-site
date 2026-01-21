@@ -281,7 +281,7 @@ export default function AdminOrderDetail() {
         }
         
         // Generate approval link with NEW token
-        const approvalUrl = `${window.location.origin}/#/approve/${updatedOrder.approval_token}`;
+        const approvalUrl = `${window.location.origin}/#/#/approve/${updatedOrder.approval_token}`;
         
         // Create message in chat with budget details and approval link
         const budgetMessage = `🔔 *ORÇAMENTO DISPONÍVEL*
