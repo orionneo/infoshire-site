@@ -116,6 +116,7 @@ export default function BudgetApproval() {
             totalCost: order.total_cost,
             laborCost: order.labor_cost,
             partsCost: order.parts_cost,
+            notificationType: 'approved',
           },
         });
 
