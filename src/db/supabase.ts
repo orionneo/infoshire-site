@@ -76,39 +76,35 @@ async function refreshSessionOnWake(reason: string) {
 }
 
 
-// =========================
-// PWA WAKE (rápido e eficiente)
-// =========================
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// --- wakeSupabase: exportado para “acordar” auth + conexão após background/tab switch ---
+export async function wakeSupabase(reason: string = 'manual') {
+  // evita rodar quando offline
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
 
-export async function wakeSupabase(reason = 'manual') {
   try {
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
-
-    // 1) Sessão: só refresh se for realmente necessário
+    // 1) Garante que existe sessão local e tenta refresh se estiver perto de expirar
     const { data } = await supabase.auth.getSession();
     const session = data.session;
+
     if (session?.expires_at) {
       const expiresAtMs = session.expires_at * 1000;
-      if (expiresAtMs - Date.now() < 60 * 1000) {
+      const now = Date.now();
+      const willExpireSoon = expiresAtMs - now < 3 * 60 * 1000; // 3 min
+      if (willExpireSoon) {
+        console.log('🔁 wakeSupabase refreshSession:', reason);
         await supabase.auth.refreshSession();
       }
     }
 
-    // 2) Ping curtíssimo para “acordar” rede/conexão
-    // (timeout baixo para não “prender” o fluxo)
-    await Promise.race([
-      supabase.from('profiles').select('id').limit(1),
-      sleep(2500).then(() => {
-        throw new Error('wakeSupabase timeout');
-      }),
-    ]);
-
-    console.log('✅ wakeSupabase ok:', reason);
+    // 2) “Ping” leve no PostgREST (qualquer tabela que o admin consiga ler)
+    // Isso costuma “destravar” requests pendentes após voltar do background.
+    // Se preferir outra tabela mais segura, troque aqui.
+    await supabase.from('profiles').select('id').limit(1);
   } catch (e) {
-    console.warn('⚠️ wakeSupabase falhou:', reason, e);
+    console.warn('⚠️ wakeSupabase falhou:', e);
   }
 }
+
 
 
 if (typeof window !== 'undefined') {
