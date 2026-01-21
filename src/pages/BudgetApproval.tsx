@@ -30,10 +30,7 @@ export default function BudgetApproval() {
     try {
       const { data, error: fetchError } = await supabase
         .from('service_orders')
-        .select(`
-          *,
-          client:profiles!service_orders_client_id_fkey(*)
-        `)
+        .select(`*`)
         .eq('approval_token', token)
         .single();
 
@@ -345,9 +342,9 @@ export default function BudgetApproval() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-muted-foreground">Nome</p>
-                <p className="font-medium">{order.client.name}</p>
+                <p className="font-medium">{order.client?.name ?? 'Cliente'}</p>
               </div>
-              {order.client.phone && (
+              {order.client?.phone && (
                 <div>
                   <p className="text-sm text-muted-foreground">Telefone</p>
                   <p className="font-medium">{order.client.phone}</p>
