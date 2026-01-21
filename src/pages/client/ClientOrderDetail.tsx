@@ -18,6 +18,16 @@ import { supabase } from '@/db/supabase';
 import { useToast } from '@/hooks/use-toast';
 import type { ApprovalHistory, OrderStatusHistoryWithUser, ServiceOrderItem, ServiceOrderWithClient } from '@/types/types';
 
+const formatDateTime = (iso?: string | null) => {
+  if (!iso) return '-';
+  return format(new Date(iso), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR });
+};
+
+const formatDate = (iso?: string | null) => {
+  if (!iso) return '-';
+  return format(new Date(iso), 'dd/MM/yyyy', { locale: ptBR });
+};
+
 export default function ClientOrderDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -36,11 +46,12 @@ export default function ClientOrderDetail() {
       loadApprovalHistory();
       loadAdditionalItems();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   const loadOrder = async () => {
     if (!id) return;
-    
+
     try {
       const data = await getServiceOrder(id);
       setOrder(data);
@@ -53,7 +64,7 @@ export default function ClientOrderDetail() {
 
   const loadHistory = async () => {
     if (!id) return;
-    
+
     try {
       const data = await getOrderStatusHistory(id);
       setHistory(data);
@@ -64,7 +75,7 @@ export default function ClientOrderDetail() {
 
   const loadAdditionalItems = async () => {
     if (!id) return;
-    
+
     try {
       const data = await getServiceOrderItems(id);
       setAdditionalItems(data);
@@ -75,7 +86,7 @@ export default function ClientOrderDetail() {
 
   const loadApprovalHistory = async () => {
     if (!id) return;
-    
+
     try {
       const { data, error } = await supabase
         .from('approval_history')
@@ -92,24 +103,20 @@ export default function ClientOrderDetail() {
 
   const handleApprove = async () => {
     if (!id || !order) return;
-    
+
     setApproving(true);
     try {
-      // Save to approval history
-      const { error: historyError } = await supabase
-        .from('approval_history')
-        .insert({
-          order_id: id,
-          labor_cost: order.labor_cost,
-          parts_cost: order.parts_cost,
-          total_cost: order.total_cost,
-          approved_at: new Date().toISOString(),
-          notes: `Orçamento aprovado pelo cliente`,
-        });
+      const { error: historyError } = await supabase.from('approval_history').insert({
+        order_id: id,
+        labor_cost: order.labor_cost,
+        parts_cost: order.parts_cost,
+        total_cost: order.total_cost,
+        approved_at: new Date().toISOString(),
+        notes: `Orçamento aprovado pelo cliente`,
+      });
 
       if (historyError) throw historyError;
 
-      // Update order
       const { error } = await supabase
         .from('service_orders')
         .update({
@@ -121,16 +128,16 @@ export default function ClientOrderDetail() {
 
       if (error) throw error;
 
-      // Create status history entry with budget details
-      const budgetDetails = `Mão de Obra: R$ ${order.labor_cost?.toFixed(2).replace('.', ',')} | Peças: R$ ${order.parts_cost?.toFixed(2).replace('.', ',')} | Total: R$ ${order.total_cost?.toFixed(2).replace('.', ',')}`;
-      const { error: statusHistoryError } = await supabase
-        .from('order_status_history')
-        .insert({
-          order_id: id,
-          status: 'in_repair',
-          notes: `Orçamento aprovado pelo cliente - ${budgetDetails}`,
-          created_by: order.client_id,
-        });
+      const budgetDetails = `Mão de Obra: R$ ${order.labor_cost?.toFixed(2).replace('.', ',')} | Peças: R$ ${order.parts_cost
+        ?.toFixed(2)
+        .replace('.', ',')} | Total: R$ ${order.total_cost?.toFixed(2).replace('.', ',')}`;
+
+      const { error: statusHistoryError } = await supabase.from('order_status_history').insert({
+        order_id: id,
+        status: 'in_repair',
+        notes: `Orçamento aprovado pelo cliente - ${budgetDetails}`,
+        created_by: order.client_id,
+      });
 
       if (statusHistoryError) throw statusHistoryError;
 
@@ -139,7 +146,6 @@ export default function ClientOrderDetail() {
         description: 'O reparo será iniciado em breve.',
       });
 
-      // Reload order
       await loadOrder();
       await loadHistory();
       await loadApprovalHistory();
@@ -157,7 +163,7 @@ export default function ClientOrderDetail() {
 
   const handleReject = async () => {
     if (!id || !order) return;
-    
+
     setApproving(true);
     try {
       const { error } = await supabase
@@ -170,15 +176,12 @@ export default function ClientOrderDetail() {
 
       if (error) throw error;
 
-      // Create status history entry
-      const { error: historyError } = await supabase
-        .from('order_status_history')
-        .insert({
-          order_id: id,
-          status: 'received',
-          notes: 'Orçamento recusado pelo cliente',
-          created_by: order.client_id,
-        });
+      const { error: historyError } = await supabase.from('order_status_history').insert({
+        order_id: id,
+        status: 'received',
+        notes: 'Orçamento recusado pelo cliente',
+        created_by: order.client_id,
+      });
 
       if (historyError) throw historyError;
 
@@ -187,7 +190,6 @@ export default function ClientOrderDetail() {
         description: 'O técnico será notificado.',
       });
 
-      // Reload order
       await loadOrder();
       await loadHistory();
     } catch (error: any) {
@@ -262,42 +264,43 @@ export default function ClientOrderDetail() {
                 <p className="text-sm text-muted-foreground">Equipamento</p>
                 <p className="font-medium">{order.equipment}</p>
               </div>
+
               {order.serial_number && (
                 <div>
                   <p className="text-sm text-muted-foreground">Número de Série (S/N)</p>
                   <p className="font-medium font-mono text-sm">{order.serial_number}</p>
                 </div>
               )}
+
               {order.has_multiple_items && additionalItems.length > 0 && (
                 <div>
                   <p className="text-sm text-muted-foreground mb-2">Equipamentos Adicionais</p>
                   <div className="space-y-2">
                     {additionalItems.map((item, index) => (
                       <div key={item.id} className="p-3 border rounded-lg bg-muted/30">
-                        <p className="font-medium text-sm mb-1">Item {index + 1}: {item.equipment}</p>
+                        <p className="font-medium text-sm mb-1">
+                          Item {index + 1}: {item.equipment}
+                        </p>
                         {item.serial_number && (
                           <p className="text-xs text-muted-foreground">
                             <span className="font-medium">S/N:</span> <span className="font-mono">{item.serial_number}</span>
                           </p>
                         )}
-                        {item.description && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {item.description}
-                          </p>
-                        )}
+                        {item.description && <p className="text-xs text-muted-foreground mt-1">{item.description}</p>}
                       </div>
                     ))}
                   </div>
                 </div>
               )}
+
+              {/* ✅ Entrada (pode ser retroativa): mostra só data */}
               {order.entry_date && (
                 <div>
                   <p className="text-sm text-muted-foreground">Data de Entrada</p>
-                  <p className="font-medium">
-                    {format(new Date(order.entry_date), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                  </p>
+                  <p className="font-medium">{formatDate(order.entry_date)}</p>
                 </div>
               )}
+
               {order.equipment_photo_url && (
                 <div>
                   <p className="text-sm text-muted-foreground mb-2">Foto do Equipamento</p>
@@ -308,116 +311,99 @@ export default function ClientOrderDetail() {
                   />
                 </div>
               )}
+
               <div>
                 <p className="text-sm text-muted-foreground">Problema</p>
                 <p className="font-medium">{order.problem_description}</p>
               </div>
+
               <div>
                 <p className="text-sm text-muted-foreground">Status</p>
                 <div className="mt-1">
                   <OrderStatusBadge status={order.status} />
                 </div>
               </div>
+
+              {/* ✅ Registrado no sistema (created_at) */}
               <div>
-                <p className="text-sm text-muted-foreground">Criado em</p>
-                <p className="font-medium">
-                  {format(new Date(order.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                </p>
+                <p className="text-sm text-muted-foreground">Registrado em</p>
+                <p className="font-medium">{formatDateTime(order.created_at)}</p>
               </div>
+
               {order.estimated_completion && (
                 <div>
                   <p className="text-sm text-muted-foreground">Previsão de Conclusão</p>
                   <p className="font-medium flex items-center gap-2">
                     <Clock className="h-4 w-4" />
-                    {format(new Date(order.estimated_completion), "dd/MM/yyyy", { locale: ptBR })}
+                    {formatDate(order.estimated_completion)}
                   </p>
                 </div>
               )}
+
               {order.completed_at && (
                 <div>
                   <p className="text-sm text-muted-foreground">Concluído em</p>
-                  <p className="font-medium">
-                    {format(new Date(order.completed_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                  </p>
+                  <p className="font-medium">{formatDateTime(order.completed_at)}</p>
                 </div>
               )}
-              
+
               {/* Budget Information */}
               {order.total_cost && order.total_cost > 0 && (
                 <div className="pt-4 border-t space-y-3">
                   <h3 className="font-semibold text-lg">Orçamento</h3>
+
                   {order.labor_cost && order.labor_cost > 0 && (
                     <div className="flex justify-between">
                       <span className="text-sm text-muted-foreground">Mão de Obra</span>
                       <span className="font-medium">R$ {order.labor_cost.toFixed(2).replace('.', ',')}</span>
                     </div>
                   )}
+
                   {order.parts_cost && order.parts_cost > 0 && (
                     <div className="flex justify-between">
                       <span className="text-sm text-muted-foreground">Peças</span>
                       <span className="font-medium">R$ {order.parts_cost.toFixed(2).replace('.', ',')}</span>
                     </div>
                   )}
+
                   <div className="flex justify-between items-center pt-2 border-t">
                     <span className="font-bold">Total</span>
-                    <span className="font-bold text-xl text-primary">
-                      R$ {order.total_cost.toFixed(2).replace('.', ',')}
-                    </span>
+                    <span className="font-bold text-xl text-primary">R$ {order.total_cost.toFixed(2).replace('.', ',')}</span>
                   </div>
+
                   {order.budget_notes && (
                     <div className="pt-2">
                       <p className="text-xs text-muted-foreground mb-1">Observações</p>
                       <p className="text-sm">{order.budget_notes}</p>
                     </div>
                   )}
-                  
-                  {/* Approval Buttons - Show only if awaiting approval */}
+
+                  {/* Approval Buttons */}
                   {order.status === 'awaiting_approval' && !order.budget_approved && (
                     <div className="pt-4 space-y-2">
-                      <p className="text-sm font-medium text-center mb-3">
-                        Deseja aprovar este orçamento?
-                      </p>
+                      <p className="text-sm font-medium text-center mb-3">Deseja aprovar este orçamento?</p>
                       <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          variant="outline"
-                          className="w-full"
-                          onClick={handleReject}
-                          disabled={approving}
-                        >
-                          {approving ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <X className="mr-2 h-4 w-4" />
-                          )}
+                        <Button variant="outline" className="w-full" onClick={handleReject} disabled={approving}>
+                          {approving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <X className="mr-2 h-4 w-4" />}
                           Recusar
                         </Button>
-                        <Button
-                          className="w-full"
-                          onClick={handleApprove}
-                          disabled={approving}
-                        >
-                          {approving ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <Check className="mr-2 h-4 w-4" />
-                          )}
+                        <Button className="w-full" onClick={handleApprove} disabled={approving}>
+                          {approving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Check className="mr-2 h-4 w-4" />}
                           Aprovar
                         </Button>
                       </div>
                     </div>
                   )}
-                  
+
                   {order.budget_approved && order.approved_at && (
                     <div className="pt-2 flex items-center gap-2 text-green-600 dark:text-green-400">
                       <Check className="h-4 w-4" />
-                      <span className="text-sm font-medium">
-                        Aprovado em {format(new Date(order.approved_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                      </span>
+                      <span className="text-sm font-medium">Aprovado em {formatDateTime(order.approved_at)}</span>
                     </div>
                   )}
                 </div>
               )}
-              
+
               {/* Approval History */}
               {approvalHistory.length > 0 && (
                 <div className="pt-4 border-t space-y-3">
@@ -449,19 +435,12 @@ export default function ClientOrderDetail() {
                             </div>
                           )}
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          Aprovado em {format(new Date(approval.approved_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
-                        </div>
-                        {approval.notes && (
-                          <div className="text-xs text-muted-foreground italic">
-                            {approval.notes}
-                          </div>
-                        )}
+                        <div className="text-xs text-muted-foreground">Aprovado em {formatDateTime(approval.approved_at)}</div>
+                        {approval.notes && <div className="text-xs text-muted-foreground italic">{approval.notes}</div>}
                       </div>
                     ))}
                   </div>
-                  
-                  {/* Total Consolidado */}
+
                   {approvalHistory.length > 1 && (
                     <div className="p-4 bg-primary/10 rounded-lg border-2 border-primary">
                       <div className="flex justify-between items-center">
@@ -470,9 +449,7 @@ export default function ClientOrderDetail() {
                           R$ {approvalHistory.reduce((sum, a) => sum + (a.total_cost || 0), 0).toFixed(2).replace('.', ',')}
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Soma de todas as aprovações realizadas
-                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">Soma de todas as aprovações realizadas</p>
                     </div>
                   )}
                 </div>
@@ -497,9 +474,7 @@ export default function ClientOrderDetail() {
                   </CardHeader>
                   <CardContent>
                     {history.length === 0 && approvalHistory.length === 0 ? (
-                      <p className="text-muted-foreground text-center py-8">
-                        Nenhum histórico disponível
-                      </p>
+                      <p className="text-muted-foreground text-center py-8">Nenhum histórico disponível</p>
                     ) : (
                       <OrderTimeline history={history} approvalHistory={approvalHistory} />
                     )}
