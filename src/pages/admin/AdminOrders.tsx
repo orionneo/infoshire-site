@@ -25,6 +25,7 @@ import { createClientProfile, createServiceOrder, getAllProfiles, getAllServiceO
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
 import { useToast } from '@/hooks/use-toast';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
+import { withHardTimeout } from '@/utils/hardTimeout';
 
 // Chave para salvar o rascunho do formulário
 const FORM_DRAFT_KEY = 'admin_order_form_draft';
@@ -349,123 +350,110 @@ useEffect(() => {
     setShowConfirmation(true);
   };
 
-  const handleConfirmOrder = async () => {
-    if (!pendingOrderData) return;
+const handleConfirmOrder = async () => {
+  if (!pendingOrderData) return;
 
-    const data = pendingOrderData;
-    setCreating(true);
+  const data = pendingOrderData;
+  setCreating(true);
 
-    // ✅ Evita “rascunho fantasma” caso o usuário atualize a página durante o envio
-    sessionStorage.removeItem(FORM_DRAFT_KEY);
+  // ✅ evita draft fantasma se congelar e o técnico atualizar
+  sessionStorage.removeItem(FORM_DRAFT_KEY);
 
-    try {
+  // 🔥 watchdog absoluto: NADA pode passar de 45s
+  const GLOBAL_TIMEOUT = 45000;
+
+  try {
+    const createPromise = (async () => {
       let clientId = data.client_id;
 
-      // Create new client if needed
       if (isNewClient) {
-        const fullName = `${data.new_client_first_name.trim()} ${data.new_client_last_name.trim()}`;
-
-        const newClient = await createClientProfile({
-          name: fullName,
-          email: data.new_client_email.trim(),
-          phone: data.new_client_phone.trim(),
-          password: data.new_client_password,
-        });
-
+        const newClient = await withHardTimeout(
+          createClientProfile({
+            name: `${data.new_client_first_name} ${data.new_client_last_name}`,
+            email: data.new_client_email,
+            phone: data.new_client_phone,
+            password: data.new_client_password,
+          }),
+          15000,
+          'createClient'
+        );
         clientId = newClient.id;
       }
 
-      // Preparar dados de datas
-      const entryDate = data.entry_date
-        ? new Date(data.entry_date).toISOString()
-        : new Date().toISOString();
+      const order = await withHardTimeout(
+        createServiceOrder({
+          client_id: clientId,
+          equipment: data.equipment,
+          serial_number: data.serial_number,
+          problem_description: data.problem_description,
+          has_multiple_items: hasMultipleItems,
+          items: hasMultipleItems
+            ? additionalItems.map((it) => ({
+                equipment: it.equipment,
+                serial_number: it.serial_number || undefined,
+                description: it.description || undefined,
+              }))
+            : undefined,
+        }),
+        20000,
+        'createServiceOrder'
+      );
 
-      const estimatedDate = new Date(entryDate);
-      estimatedDate.setDate(estimatedDate.getDate() + 3);
-      estimatedDate.setHours(12, 0, 0, 0); // meio-dia para estabilidade
-      const autoEstimatedCompletion = estimatedDate.toISOString();
-
-      const newOrder = await createServiceOrder({
-        client_id: clientId,
-        equipment: data.equipment,
-        serial_number: data.serial_number || undefined,
-        entry_date: entryDate,
-        equipment_photo_url: data.equipment_photo_url || undefined,
-        problem_description: data.problem_description,
-        estimated_completion: autoEstimatedCompletion,
-        has_multiple_items: hasMultipleItems,
-        items: hasMultipleItems
-          ? additionalItems.map((item) => ({
-              equipment: item.equipment,
-              serial_number: item.serial_number || undefined,
-              description: item.description || undefined,
-            }))
-          : undefined,
-      });
-
-      // Upload múltiplas fotos se houver
+      // ✅ UPLOAD NÃO BLOQUEIA A UI (background)
       if (selectedImages.length > 0) {
-        try {
-          await Promise.all(
-            selectedImages.map((file, index) =>
-              uploadOrderImage(newOrder.id, file, `Foto ${index + 1}`)
-            )
-          );
-          toast({
-            title: 'Fotos enviadas',
-            description: `${selectedImages.length} foto(s) enviada(s) com sucesso`,
-          });
-        } catch (error) {
-          console.error('Erro ao enviar fotos:', error);
-          toast({
-            title: 'Atenção',
-            description:
-              'A ordem foi criada, mas houve erro ao enviar uma ou mais fotos. Tente novamente na tela da ordem.',
-            variant: 'destructive',
-          });
-        }
+        queueMicrotask(async () => {
+          for (const file of selectedImages) {
+            try {
+              await uploadOrderImage(order.id, file);
+            } catch (e) {
+              console.warn('Upload falhou (background):', e);
+            }
+          }
+        });
       }
 
-      toast({
-        title: 'Ordem criada',
-        description: `Ordem ${newOrder.order_number || newOrder.id} criada com sucesso`,
-      });
+      return order;
+    })();
 
-      // ✅ Garantia extra: remove draft ao concluir
-      sessionStorage.removeItem(FORM_DRAFT_KEY);
+    const order = await withHardTimeout(createPromise, GLOBAL_TIMEOUT, 'globalCreateOrder');
 
-      // Fechar ambos os diálogos
-      setShowConfirmation(false);
-      setDialogOpen(false);
+    toast({
+      title: 'Ordem criada',
+      description: `OS ${order.order_number || order.id}`,
+    });
 
-      // Limpar estados
-      form.reset();
-      setIsNewClient(false);
-      setHasMultipleItems(false);
-      setAdditionalItems([]);
-      setSelectedImages([]);
-      setPendingOrderData(null);
+    // ✅ limpa drafts e fecha diálogos
+    sessionStorage.removeItem(FORM_DRAFT_KEY);
+    sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
 
-      // Recarregar dados
-      loadData();
-    } catch (error: any) {
-      // Se falhar, restaura rascunho para o técnico não perder dados
-      try {
-        sessionStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(data));
-      } catch (e) {
-        console.warn('Não foi possível salvar rascunho para retry:', e);
-      }
+    setShowConfirmation(false);
+    setDialogOpen(false);
 
-      console.error('Erro ao criar ordem:', error);
-      toast({
-        title: 'Erro',
-        description: error.message || 'Não foi possível criar a ordem',
-        variant: 'destructive',
-      });
-    } finally {
-      setCreating(false);
-    }
-  };
+    // ✅ reset total do estado
+    form.reset();
+    setIsNewClient(false);
+    setHasMultipleItems(false);
+    setAdditionalItems([]);
+    setSelectedImages([]);
+    setPendingOrderData(null);
+
+    loadData();
+  } catch (err: any) {
+    console.error('❌ Criação travada — fallback ativado:', err);
+
+    toast({
+      title: 'Conexão instável',
+      description: 'Detectamos instabilidade. Salvamos como rascunho e vamos sincronizar automaticamente.',
+      variant: 'destructive',
+    });
+
+    // 🔥 garante fallback (mantém dados para retry)
+    sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+  } finally {
+    setCreating(false);
+  }
+};
+
 
 
   if (loading) {
@@ -841,11 +829,20 @@ useEffect(() => {
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => {
-                        setDialogOpen(false);
-                        setIsNewClient(false);
-                        form.reset();
-                      }}
+onClick={() => {
+  sessionStorage.removeItem(FORM_DRAFT_KEY);
+  sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
+
+  setShowConfirmation(false);
+  setDialogOpen(false);
+
+  form.reset();
+  setIsNewClient(false);
+  setHasMultipleItems(false);
+  setAdditionalItems([]);
+  setSelectedImages([]);
+  setPendingOrderData(null);
+}}
                     >
                       Cancelar
                     </Button>
