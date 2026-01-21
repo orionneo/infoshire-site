@@ -179,51 +179,59 @@ export async function getServiceOrder(id: string): Promise<ServiceOrderWithClien
   return data;
 }
 
-export async function createServiceOrder(order: {
-  client_id: string;
-  equipment: string;
-  serial_number?: string;
-  entry_date?: string;
-  equipment_photo_url?: string;
-  problem_description: string;
-  estimated_completion?: string;
-  has_multiple_items?: boolean;
-  items?: Array<{
+type CreateServiceOrderOptions = {
+  /** ADMIN: false => nunca enfileira offline (sem "sincronizando") */
+  allowOfflineQueue?: boolean;
+  /** Timeout global (ms) */
+  timeoutMs?: number;
+};
+
+export async function createServiceOrder(
+  order: {
+    client_id: string;
     equipment: string;
     serial_number?: string;
-    description?: string;
-  }>;
-}): Promise<ServiceOrder> {
+    entry_date?: string;
+    equipment_photo_url?: string;
+    problem_description: string;
+    estimated_completion?: string;
+    has_multiple_items?: boolean;
+    items?: Array<{
+      equipment: string;
+      serial_number?: string;
+      description?: string;
+    }>;
+  },
+  options: CreateServiceOrderOptions = {}
+): Promise<ServiceOrder> {
   // ✅ Sempre gera ID no client: permite idempotência e fallback offline
   const id = crypto.randomUUID();
 
-  // Se estiver offline, salva na fila e retorna otimista (sem travar UI)
-  if (!isOnlineNow()) {
-    await addOfflineTask({
-      type: 'CREATE_SERVICE_ORDER',
-      payload: {
-        id,
-        client_id: order.client_id,
-        equipment: order.equipment,
-        serial_number: order.serial_number ?? undefined,
-        entry_date: order.entry_date || new Date().toISOString(),
-        equipment_photo_url: order.equipment_photo_url ?? undefined,
-        problem_description: order.problem_description,
-        estimated_completion: order.estimated_completion ?? undefined,
-        has_multiple_items: order.has_multiple_items || false,
-        items:
-          order.items?.map((it) => ({
-            equipment: it.equipment,
-            serial_number: it.serial_number ?? undefined,
-            description: it.description ?? undefined,
-          })) ?? [],
-      },
-    });
+  const allowOfflineQueue = options.allowOfflineQueue !== false; // default = true
+  const overallTimeoutMs = options.timeoutMs ?? 60000;
 
-    // Retorno otimista: UI segue e a fila sincroniza depois
-    return {
+  const buildOfflinePayload = () => ({
+    id,
+    client_id: order.client_id,
+    equipment: order.equipment,
+    serial_number: order.serial_number ?? undefined,
+    entry_date: order.entry_date || new Date().toISOString(),
+    equipment_photo_url: order.equipment_photo_url ?? undefined,
+    problem_description: order.problem_description,
+    estimated_completion: order.estimated_completion ?? undefined,
+    has_multiple_items: order.has_multiple_items || false,
+    items:
+      order.items?.map((it) => ({
+        equipment: it.equipment,
+        serial_number: it.serial_number ?? undefined,
+        description: it.description ?? undefined,
+      })) ?? [],
+  });
+
+  const buildOptimisticOrder = (label: 'PENDENTE (OFFLINE)' | 'PENDENTE (SINCRONIZANDO)') =>
+    ({
       id,
-      order_number: 'PENDENTE (OFFLINE)',
+      order_number: label,
       client_id: order.client_id,
       equipment: order.equipment,
       serial_number: order.serial_number ?? undefined,
@@ -241,126 +249,115 @@ export async function createServiceOrder(order: {
       approval_token: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    } as ServiceOrder;
+    } as ServiceOrder);
+
+  // ✅ Função ONLINE real (igual sua lógica)
+  const onlineWork = async () => {
+    // 1) Número da OS (online-only) — com timeout hard
+    const { data: orderNumber, error: numberError } = await withTimeout(
+      supabase.rpc('generate_order_number'),
+      20000,
+      'generate_order_number'
+    );
+    if (numberError) throw numberError;
+
+    // 2) Cria OS com ID gerado no client (idempotente)
+    const { data, error } = await withTimeout(
+      supabase
+        .from('service_orders')
+        .insert({
+          id,
+          client_id: order.client_id,
+          equipment: order.equipment,
+          serial_number: order.serial_number,
+          entry_date: order.entry_date || new Date().toISOString(),
+          equipment_photo_url: order.equipment_photo_url,
+          problem_description: order.problem_description,
+          estimated_completion: order.estimated_completion,
+          has_multiple_items: order.has_multiple_items || false,
+          order_number: orderNumber,
+        })
+        .select()
+        .single(),
+      20000,
+      'insert service_orders'
+    );
+    if (error) throw error;
+
+    // 3) Histórico inicial
+    const { data: userRes, error: userErr } = await withTimeout(
+      supabase.auth.getUser(),
+      15000,
+      'auth.getUser'
+    );
+    if (userErr) throw userErr;
+
+    const createdBy = userRes.user?.id ?? order.client_id;
+
+    await withTimeout(
+      createOrderStatusHistory({
+        order_id: data.id,
+        status: 'received',
+        notes: 'Ordem de serviço criada',
+        created_by: createdBy,
+      }),
+      15000,
+      'createOrderStatusHistory'
+    );
+
+    // 4) Itens adicionais
+    if (order.items && order.items.length > 0) {
+      await withTimeout(createServiceOrderItems(data.id, order.items), 20000, 'createServiceOrderItems');
+    }
+
+    return data;
+  };
+
+  // =========================================================
+  // ✅ MODO ADMIN: não usa fila offline nunca
+  // =========================================================
+  if (!allowOfflineQueue) {
+    // Se estiver offline, já falha direto (admin não pode "sincronizar depois")
+    if (!isOnlineNow()) {
+      const e: any = new Error('Sem conexão no momento (ADMIN).');
+      e.code = 'ADMIN_OFFLINE';
+      throw e;
+    }
+
+    // Tenta online com watchdog e se falhar, ERRO REAL (não enfileira)
+    return await withTimeout(onlineWork(), overallTimeoutMs, 'createServiceOrder(ADMIN overall)');
+  }
+
+  // =========================================================
+  // ✅ MODO NORMAL (offline-first): comportamento antigo
+  // =========================================================
+
+  // Se estiver offline, salva na fila e retorna otimista
+  if (!isOnlineNow()) {
+    await addOfflineTask({
+      type: 'CREATE_SERVICE_ORDER',
+      payload: buildOfflinePayload(),
+    });
+
+    return buildOptimisticOrder('PENDENTE (OFFLINE)');
   }
 
   try {
-    const onlineWork = async () => {
-      // 1) Número da OS (online-only) — com timeout hard (evita spinner infinito)
-      const { data: orderNumber, error: numberError } = await withTimeout(
-        supabase.rpc('generate_order_number'),
-        20000,
-        'generate_order_number'
-      );
-      if (numberError) throw numberError;
-
-      // 2) Cria OS com ID gerado no client (idempotente)
-      const { data, error } = await withTimeout(
-        supabase
-          .from('service_orders')
-          .insert({
-            id,
-            client_id: order.client_id,
-            equipment: order.equipment,
-            serial_number: order.serial_number,
-            entry_date: order.entry_date || new Date().toISOString(),
-            equipment_photo_url: order.equipment_photo_url,
-            problem_description: order.problem_description,
-            estimated_completion: order.estimated_completion,
-            has_multiple_items: order.has_multiple_items || false,
-            order_number: orderNumber,
-          })
-          .select()
-          .single(),
-        20000,
-        'insert service_orders'
-      );
-      if (error) throw error;
-
-      // 3) Histórico inicial
-      const { data: userRes, error: userErr } = await withTimeout(
-        supabase.auth.getUser(),
-        15000,
-        'auth.getUser'
-      );
-      if (userErr) throw userErr;
-
-      const createdBy = userRes.user?.id ?? order.client_id;
-
-      await withTimeout(
-        createOrderStatusHistory({
-          order_id: data.id,
-          status: 'received',
-          notes: 'Ordem de serviço criada',
-          created_by: createdBy,
-        }),
-        15000,
-        'createOrderStatusHistory'
-      );
-
-      // 4) Itens adicionais
-      if (order.items && order.items.length > 0) {
-        await withTimeout(
-          createServiceOrderItems(data.id, order.items),
-          20000,
-          'createServiceOrderItems'
-        );
-      }
-
-      return data;
-    };
-
-    // ✅ Watchdog global: em iOS/PWA, requests podem ficar pendentes ao alternar apps.
-    // Isso garante que NUNCA ficaremos com UI presa em “Criando...” indefinidamente.
-    return await withTimeout(onlineWork(), 60000, 'createServiceOrder(overall)');
+    // Watchdog global: nunca ficar preso em “Criando...”
+    return await withTimeout(onlineWork(), overallTimeoutMs, 'createServiceOrder(overall)');
   } catch (err: any) {
-    // ✅ Se travar/rede ruim, cai no offline (não deixa a UI eternamente em "Criando...")
+    // Se travar/rede ruim, cai no offline (modo normal)
     console.warn('⚠️ createServiceOrder falhou — salvando offline:', err);
 
     await addOfflineTask({
       type: 'CREATE_SERVICE_ORDER',
-      payload: {
-        id,
-        client_id: order.client_id,
-        equipment: order.equipment,
-        serial_number: order.serial_number ?? undefined,
-        entry_date: order.entry_date || new Date().toISOString(),
-        equipment_photo_url: order.equipment_photo_url ?? undefined,
-        problem_description: order.problem_description,
-        estimated_completion: order.estimated_completion ?? undefined,
-        has_multiple_items: order.has_multiple_items || false,
-        items:
-          order.items?.map((it) => ({
-            equipment: it.equipment,
-            serial_number: it.serial_number ?? undefined,
-            description: it.description ?? undefined,
-          })) ?? [],
-      },
+      payload: buildOfflinePayload(),
     });
 
-    return {
-      id,
-      order_number: 'PENDENTE (SINCRONIZANDO)',
-      client_id: order.client_id,
-      equipment: order.equipment,
-      serial_number: order.serial_number ?? undefined,
-      entry_date: order.entry_date || new Date().toISOString(),
-      equipment_photo_url: order.equipment_photo_url ?? null,
-      problem_description: order.problem_description,
-      status: 'received',
-      estimated_completion: order.estimated_completion ?? null,
-      completed_at: null,
-      labor_cost: null,
-      parts_cost: null,
-      total_cost: null,
-      budget_approved: false,
-      approved_at: null,
-      approval_token: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    } as ServiceOrder;
+    return buildOptimisticOrder('PENDENTE (SINCRONIZANDO)');
   }
 }
+
 
 
 
@@ -1766,40 +1763,85 @@ export function replaceTemplateVariables(
  * Enviar mensagem WhatsApp para cliente (através da API externa)
  * Compatível com WhatsApp e WhatsApp Business
  */
-export async function sendWhatsAppMessage(
-  phone: string,
-  message: string
-): Promise<boolean> {
+export async function sendWhatsAppMessage(phone: string, message: string): Promise<boolean> {
   try {
-    // Remover caracteres não numéricos do telefone
-    const cleanPhone = phone.replace(/\D/g, '');
-    
-    // Verificar se o telefone tem o formato correto (mínimo 10 dígitos)
-    if (cleanPhone.length < 10) {
-      console.error('Número de telefone inválido:', phone);
+    if (typeof window === 'undefined') return false;
+
+    // Detecta PWA (standalone) e mobile
+    const isStandalone =
+      window.matchMedia?.('(display-mode: standalone)')?.matches ||
+      // @ts-ignore - iOS Safari
+      (window.navigator as any).standalone === true;
+
+    const isMobile =
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+    // Normaliza telefone
+    let cleanPhone = (phone || '').replace(/\D/g, '');
+
+    // Se veio com 0 à esquerda (muito comum), remove zeros iniciais
+    cleanPhone = cleanPhone.replace(/^0+/, '');
+
+    // Brasil: se tem 10/11 dígitos, prefixa 55
+    if (cleanPhone.length === 10 || cleanPhone.length === 11) {
+      cleanPhone = `55${cleanPhone}`;
+    }
+
+    // Se ainda estiver curto, falha
+    if (cleanPhone.length < 12) {
+      console.error('Número de telefone inválido (esperado DDI+DDD+numero):', phone, '->', cleanPhone);
       return false;
     }
 
-    // Adicionar código do país se não tiver (Brasil = 55)
-    const fullPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-
-    // Codificar mensagem para URL preservando emojis
     const encodedMessage = encodeURIComponent(message);
 
-    // Usar wa.me que funciona tanto para WhatsApp quanto WhatsApp Business
-    // O sistema detecta automaticamente qual versão o usuário tem instalada
-    const whatsappUrl = `https://wa.me/${fullPhone}?text=${encodedMessage}`;
-    
-    // Abrir diretamente em nova aba sem confirmação
-    if (typeof window !== 'undefined') {
-      // Usar window.open com noopener e noreferrer para segurança
-      const newWindow = window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-      
-      // Verificar se o pop-up foi bloqueado
-      if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
-        console.warn('Pop-up bloqueado. Tentando abrir na mesma aba...');
-        window.location.href = whatsappUrl;
+    // URLs mais compatíveis (wa.me é ótima, api.whatsapp.com costuma funcionar bem em iOS/PWA)
+    const urlWaMe = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
+    const urlApi = `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${encodedMessage}`;
+
+    // Android PWA: intent:// às vezes abre mais direto o app
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const urlIntent = isAndroid
+      ? `intent://send?phone=${cleanPhone}&text=${encodedMessage}#Intent;scheme=whatsapp;package=com.whatsapp;end`
+      : null;
+
+    // ✅ Regra de ouro:
+    // - PWA standalone e/ou Mobile: usar navegação na MESMA aba (location.href/assign)
+    // - Desktop: pode usar window.open em nova aba
+    const openSameTab = (u: string) => {
+      // assign preserva histórico de forma ok; href também funciona
+      window.location.assign(u);
+    };
+
+    // 1) PWA standalone => SEMPRE mesma aba
+    if (isStandalone) {
+      // tenta a mais compatível primeiro
+      openSameTab(urlApi);
+      return true;
+    }
+
+    // 2) Mobile browser => mesma aba (evita bloqueio de popup)
+    if (isMobile) {
+      // Android: tenta intent primeiro (quando existir), senão cai no api/wa.me
+      if (urlIntent) {
+        try {
+          openSameTab(urlIntent);
+          return true;
+        } catch {
+          // ignora e cai no próximo
+        }
       }
+
+      // iOS / geral
+      openSameTab(urlApi);
+      return true;
+    }
+
+    // 3) Desktop => nova aba ok, com fallback para mesma aba se popup bloquear
+    const newWindow = window.open(urlWaMe, '_blank', 'noopener,noreferrer');
+    if (!newWindow || newWindow.closed || typeof newWindow.closed === 'undefined') {
+      console.warn('Pop-up bloqueado. Abrindo WhatsApp na mesma aba...');
+      openSameTab(urlWaMe);
     }
 
     return true;
@@ -1815,13 +1857,14 @@ export async function sendWhatsAppMessage(
  */
 export async function sendOrderCompletedWhatsApp(orderId: string): Promise<boolean> {
   try {
-    // Buscar dados da ordem
     const { data: order, error: orderError } = await supabase
       .from('service_orders')
-      .select(`
+      .select(
+        `
         *,
         client:profiles!service_orders_client_id_fkey(*)
-      `)
+      `
+      )
       .eq('id', orderId)
       .single();
 
@@ -1831,23 +1874,20 @@ export async function sendOrderCompletedWhatsApp(orderId: string): Promise<boole
       return false;
     }
 
-    // Buscar template
     const template = await getSystemSetting('whatsapp_template_order_completed');
     if (!template) {
       console.error('Template de WhatsApp não encontrado');
       return false;
     }
 
-    // Formatar datas
-    const dataConclusao = order.data_conclusao 
-      ? format(new Date(order.data_conclusao), "dd/MM/yyyy", { locale: ptBR })
-      : format(new Date(), "dd/MM/yyyy", { locale: ptBR });
+    const dataConclusao = order.data_conclusao
+      ? format(new Date(order.data_conclusao), 'dd/MM/yyyy', { locale: ptBR })
+      : format(new Date(), 'dd/MM/yyyy', { locale: ptBR });
 
     const dataFimGarantia = order.data_fim_garantia
-      ? format(new Date(order.data_fim_garantia), "dd/MM/yyyy", { locale: ptBR })
-      : format(addDays(new Date(), 90), "dd/MM/yyyy", { locale: ptBR });
+      ? format(new Date(order.data_fim_garantia), 'dd/MM/yyyy', { locale: ptBR })
+      : format(addDays(new Date(), 90), 'dd/MM/yyyy', { locale: ptBR });
 
-    // Preparar variáveis
     const variables = {
       nome_cliente: order.client.name || 'Cliente',
       numero_os: order.order_number?.toString() || 'N/A',
@@ -1856,10 +1896,8 @@ export async function sendOrderCompletedWhatsApp(orderId: string): Promise<boole
       data_fim_garantia: dataFimGarantia,
     };
 
-    // Substituir variáveis no template
     const message = replaceTemplateVariables(template, variables);
 
-    // Enviar WhatsApp
     const phone = order.client.phone || '';
     if (!phone) {
       console.error('Cliente sem telefone cadastrado');
@@ -1872,6 +1910,7 @@ export async function sendOrderCompletedWhatsApp(orderId: string): Promise<boole
     return false;
   }
 }
+
 
 // ============================================
 // ANALYTICS

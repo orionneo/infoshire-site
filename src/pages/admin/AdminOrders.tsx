@@ -25,7 +25,6 @@ import { createClientProfile, createServiceOrder, getAllProfiles, getAllServiceO
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
 import { useToast } from '@/hooks/use-toast';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
-import { withHardTimeout } from '@/utils/hardTimeout';
 
 // Chave para salvar o rascunho do formulário
 const FORM_DRAFT_KEY = 'admin_order_form_draft';
@@ -356,66 +355,49 @@ const handleConfirmOrder = async () => {
   const data = pendingOrderData;
   setCreating(true);
 
-  // ✅ evita draft fantasma se congelar e o técnico atualizar
-  sessionStorage.removeItem(FORM_DRAFT_KEY);
-
-  // 🔥 watchdog absoluto: NADA pode passar de 45s
-  const GLOBAL_TIMEOUT = 45000;
-
   try {
-    const createPromise = (async () => {
-      let clientId = data.client_id;
+    let clientId = data.client_id;
 
-      if (isNewClient) {
-        const newClient = await withHardTimeout(
-          createClientProfile({
-            name: `${data.new_client_first_name} ${data.new_client_last_name}`,
-            email: data.new_client_email,
-            phone: data.new_client_phone,
-            password: data.new_client_password,
-          }),
-          15000,
-          'createClient'
-        );
-        clientId = newClient.id;
+    if (isNewClient) {
+      const newClient = await createClientProfile({
+        name: `${data.new_client_first_name} ${data.new_client_last_name}`,
+        email: data.new_client_email,
+        phone: data.new_client_phone,
+        password: data.new_client_password,
+      });
+      clientId = newClient.id;
+    }
+
+  const order = await createServiceOrder(
+  {
+    client_id: clientId,
+    entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
+    equipment: data.equipment,
+    serial_number: data.serial_number,
+    problem_description: data.problem_description,
+    has_multiple_items: hasMultipleItems,
+    items: hasMultipleItems
+      ? additionalItems.map((it) => ({
+          equipment: it.equipment,
+          serial_number: it.serial_number || undefined,
+          description: it.description || undefined,
+        }))
+      : undefined,
+  },
+  { allowOfflineQueue: false, timeoutMs: 60000 } // ✅ ADMIN: sem "sincronizando"
+);
+
+
+    // ✅ Upload de imagens: não “quebra” a criação se falhar upload
+    if (selectedImages.length > 0) {
+      for (const file of selectedImages) {
+        try {
+          await uploadOrderImage(order.id, file);
+        } catch (e) {
+          console.warn('Upload falhou (não bloqueia OS):', e);
+        }
       }
-
-      const order = await withHardTimeout(
-        createServiceOrder({
-          client_id: clientId,
-          equipment: data.equipment,
-          serial_number: data.serial_number,
-          problem_description: data.problem_description,
-          has_multiple_items: hasMultipleItems,
-          items: hasMultipleItems
-            ? additionalItems.map((it) => ({
-                equipment: it.equipment,
-                serial_number: it.serial_number || undefined,
-                description: it.description || undefined,
-              }))
-            : undefined,
-        }),
-        20000,
-        'createServiceOrder'
-      );
-
-      // ✅ UPLOAD NÃO BLOQUEIA A UI (background)
-      if (selectedImages.length > 0) {
-        queueMicrotask(async () => {
-          for (const file of selectedImages) {
-            try {
-              await uploadOrderImage(order.id, file);
-            } catch (e) {
-              console.warn('Upload falhou (background):', e);
-            }
-          }
-        });
-      }
-
-      return order;
-    })();
-
-    const order = await withHardTimeout(createPromise, GLOBAL_TIMEOUT, 'globalCreateOrder');
+    }
 
     toast({
       title: 'Ordem criada',
@@ -439,20 +421,26 @@ const handleConfirmOrder = async () => {
 
     loadData();
   } catch (err: any) {
-    console.error('❌ Criação travada — fallback ativado:', err);
+    console.error('❌ Falha ao criar OS:', err);
 
+    // ✅ Admin NÃO entra em "modo offline/queue" por timeout
+    // Mostra erro real e mantém draft pra tentar novamente
     toast({
-      title: 'Conexão instável',
-      description: 'Detectamos instabilidade. Salvamos como rascunho e vamos sincronizar automaticamente.',
+      title: 'Erro ao criar OS',
+      description:
+        err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
+          ? 'Sem conexão no momento. Verifique internet e tente novamente.'
+          : err?.message || 'Falha inesperada ao criar a OS.',
       variant: 'destructive',
     });
 
-    // 🔥 garante fallback (mantém dados para retry)
+    // mantém rascunho do form (não apaga)
     sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
   } finally {
     setCreating(false);
   }
 };
+
 
 
 
