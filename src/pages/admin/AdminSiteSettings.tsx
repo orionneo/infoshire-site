@@ -114,6 +114,7 @@ export default function AdminSiteSettings() {
           totalCost: 100.00,
           laborCost: 50.00,
           partsCost: 50.00,
+          notificationType: 'approved',
         },
       });
 
