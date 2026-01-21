@@ -46,7 +46,13 @@ export default function BudgetApproval() {
         setApproved(true);
       }
 
-      setOrder(data as ServiceOrderWithClient);
+      const normalized: any = {
+        ...(data as any),
+        // Em rota pública (anon), não assumimos join com profiles
+        client: (data as any)?.client ?? { name: 'Cliente', phone: '', email: '' },
+      };
+
+      setOrder(normalized as ServiceOrderWithClient);
     } catch (err) {
       console.error('Erro ao carregar orçamento:', err);
       setError('Erro ao carregar orçamento. Verifique o link e tente novamente.');
@@ -147,7 +153,7 @@ export default function BudgetApproval() {
         .from('service_orders')
         .update({
           budget_approved: false,
-          status: 'in_analysis',
+          status: 'analyzing',
         })
         .eq('approval_token', token);
 
@@ -158,7 +164,7 @@ export default function BudgetApproval() {
         .from('order_status_history')
         .insert({
           order_id: order.id,
-          status: 'in_analysis',
+          status: 'analyzing',
           notes: 'Orçamento recusado pelo cliente via link',
           created_by: order.client_id,
         });
