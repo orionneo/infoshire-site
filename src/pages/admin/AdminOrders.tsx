@@ -101,23 +101,31 @@ export default function AdminOrders() {
   });
 
   // Restaurar rascunho do formulário ao abrir o diálogo
-  useEffect(() => {
-    if (dialogOpen) {
-      try {
-        const savedDraft = sessionStorage.getItem(FORM_DRAFT_KEY);
-        if (savedDraft) {
-          const draft = JSON.parse(savedDraft);
-          form.reset(draft);
-          toast({
-            title: 'Rascunho restaurado',
-            description: 'Seus dados foram recuperados automaticamente',
-          });
-        }
-      } catch (error) {
-        console.error('Erro ao restaurar rascunho:', error);
+useEffect(() => {
+    if (!dialogOpen) return;
+
+    try {
+      const savedDraft = sessionStorage.getItem(FORM_DRAFT_KEY);
+      if (savedDraft) {
+        const draft = JSON.parse(savedDraft);
+        form.reset(draft);
+        toast({
+          title: 'Rascunho restaurado',
+          description: 'Seus dados foram recuperados automaticamente',
+        });
+        return;
       }
+    } catch (error) {
+      console.error('Erro ao restaurar rascunho:', error);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    // ✅ Novo formulário: garante que não “herda” dados da última OS
+    form.reset();
+    setIsNewClient(false);
+    setHasMultipleItems(false);
+    setAdditionalItems([]);
+    setSelectedImages([]);
+    setPendingOrderData(null);
   }, [dialogOpen]);
 
   // ✅ Garantir default do entry_date = hoje, se não vier do draft
@@ -347,6 +355,9 @@ export default function AdminOrders() {
     const data = pendingOrderData;
     setCreating(true);
 
+    // ✅ Evita “rascunho fantasma” caso o usuário atualize a página durante o envio
+    sessionStorage.removeItem(FORM_DRAFT_KEY);
+
     try {
       let clientId = data.client_id;
 
@@ -362,19 +373,14 @@ export default function AdminOrders() {
         });
 
         clientId = newClient.id;
-
-        toast({
-          title: 'Cliente criado',
-          description: `Cliente ${newClient.name} cadastrado com sucesso`,
-        });
       }
 
-      // ✅ entry_date pode ser retroativo
-      const now = new Date();
-      const entryDate = data.entry_date ? dateInputToLocalISOString(data.entry_date) : now.toISOString();
+      // Preparar dados de datas
+      const entryDate = data.entry_date
+        ? new Date(data.entry_date).toISOString()
+        : new Date().toISOString();
 
-      // ✅ Previsão SEMPRE: hoje + 3 dias (independente do entry_date retroativo)
-      const estimatedDate = new Date(now);
+      const estimatedDate = new Date(entryDate);
       estimatedDate.setDate(estimatedDate.getDate() + 3);
       estimatedDate.setHours(12, 0, 0, 0); // meio-dia para estabilidade
       const autoEstimatedCompletion = estimatedDate.toISOString();
@@ -400,7 +406,11 @@ export default function AdminOrders() {
       // Upload múltiplas fotos se houver
       if (selectedImages.length > 0) {
         try {
-          await Promise.all(selectedImages.map((file, index) => uploadOrderImage(newOrder.id, file, `Foto ${index + 1}`)));
+          await Promise.all(
+            selectedImages.map((file, index) =>
+              uploadOrderImage(newOrder.id, file, `Foto ${index + 1}`)
+            )
+          );
           toast({
             title: 'Fotos enviadas',
             description: `${selectedImages.length} foto(s) enviada(s) com sucesso`,
@@ -408,8 +418,9 @@ export default function AdminOrders() {
         } catch (error) {
           console.error('Erro ao enviar fotos:', error);
           toast({
-            title: 'Aviso',
-            description: 'OS criada, mas houve erro ao enviar algumas fotos',
+            title: 'Atenção',
+            description:
+              'A ordem foi criada, mas houve erro ao enviar uma ou mais fotos. Tente novamente na tela da ordem.',
             variant: 'destructive',
           });
         }
@@ -417,10 +428,10 @@ export default function AdminOrders() {
 
       toast({
         title: 'Ordem criada',
-        description: `OS #${newOrder.order_number} criada com sucesso`,
+        description: `Ordem ${newOrder.order_number || newOrder.id} criada com sucesso`,
       });
 
-      // Limpar rascunho salvo
+      // ✅ Garantia extra: remove draft ao concluir
       sessionStorage.removeItem(FORM_DRAFT_KEY);
 
       // Fechar ambos os diálogos
@@ -438,6 +449,13 @@ export default function AdminOrders() {
       // Recarregar dados
       loadData();
     } catch (error: any) {
+      // Se falhar, restaura rascunho para o técnico não perder dados
+      try {
+        sessionStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(data));
+      } catch (e) {
+        console.warn('Não foi possível salvar rascunho para retry:', e);
+      }
+
       console.error('Erro ao criar ordem:', error);
       toast({
         title: 'Erro',
@@ -448,6 +466,7 @@ export default function AdminOrders() {
       setCreating(false);
     }
   };
+
 
   if (loading) {
     return (
