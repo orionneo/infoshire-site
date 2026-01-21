@@ -5,33 +5,46 @@ import { createClient } from '@supabase/supabase-js';
 // Evita travamento eterno (Safari / PWA / background)
 // ================================
 
-let __lockQueue: Promise<any> = Promise.resolve();
+let __lockQueue: Promise<void> = Promise.resolve();
 
 /**
  * Lock em memória compatível com Supabase LockFunc
- * NUNCA deixa a fila travar indefinidamente
+ * - Aplica timeout no "acquire" (esperar a fila)
+ * - Se detectar deadlock, reseta a fila
+ * - Nunca deixa a fila presa
  */
-export const memoryLock = async (
+export const memoryLock = async <T>(
   _key: string,
   acquireTimeout: number,
-  fn: () => Promise<any>
-) => {
+  fn: () => Promise<T>
+): Promise<T> => {
   const timeoutMs = Math.max(5000, Number(acquireTimeout || 15000));
 
-  const runFnWithTimeout = () =>
-    Promise.race([
-      fn(),
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`memoryLock timeout after ${timeoutMs}ms`)),
-          timeoutMs
-        )
-      ),
+  // 1) Espera sua vez na fila, mas com timeout.
+  let acquireTimer: any;
+  try {
+    await Promise.race([
+      __lockQueue,
+      new Promise<void>((_, reject) => {
+        acquireTimer = setTimeout(() => {
+          reject(new Error(`memoryLock timeout after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
     ]);
+  } catch (e) {
+    // ✅ Deadlock: alguém antes travou. Quebra a fila para não condenar o app.
+    console.warn('⚠️ memoryLock acquire deadlock detected — resetting lock queue:', e);
+    __lockQueue = Promise.resolve();
+  } finally {
+    clearTimeout(acquireTimer);
+  }
 
-  const run = __lockQueue.then(runFnWithTimeout, runFnWithTimeout);
+  // 2) Executa o trabalho (não precisa timeout aqui; o acquire já impede infinito).
+  const run = (async () => {
+    return await fn();
+  })();
 
-  // ✅ LIBERA A FILA SEMPRE (SUCESSO, ERRO OU TIMEOUT)
+  // 3) Garante que a fila SEMPRE libera, mesmo com erro.
   __lockQueue = run.then(
     () => undefined,
     () => undefined
