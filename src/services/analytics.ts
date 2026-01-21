@@ -286,7 +286,25 @@ export function getBrowser(): string {
  * - nunca quebra fluxo
  */
 export async function getGeolocation(): Promise<{ city: string | null; country: string | null }> {
+  // 0) Se offline, nem tenta
   if (!navigator.onLine) return { city: null, country: null };
+
+  // 1) Evitar Codespaces Preview / github.dev (CORS e manifest proxy costumam quebrar)
+  const host = (window.location?.hostname || '').toLowerCase();
+  const isCodespaces =
+    host.endsWith('.app.github.dev') ||
+    host.endsWith('.github.dev') ||
+    host === 'github.dev';
+
+  if (isCodespaces) return { city: null, country: null };
+
+  // 2) (Opcional) Evitar PWA standalone (iOS/Edge às vezes bloqueia storage/requests e polui logs)
+  const isStandalone =
+    window.matchMedia?.('(display-mode: standalone)')?.matches ||
+    // @ts-ignore - iOS Safari legacy
+    window.navigator?.standalone === true;
+
+  if (isStandalone) return { city: null, country: null };
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 1200);
@@ -295,6 +313,8 @@ export async function getGeolocation(): Promise<{ city: string | null; country: 
     const response = await fetch('https://ipapi.co/json/', {
       method: 'GET',
       headers: { Accept: 'application/json' },
+      mode: 'cors',
+      credentials: 'omit',
       signal: controller.signal,
     });
 
@@ -311,6 +331,7 @@ export async function getGeolocation(): Promise<{ city: string | null; country: 
     clearTimeout(timeout);
   }
 }
+
 
 // ============================================
 // SESSION TRACKING
