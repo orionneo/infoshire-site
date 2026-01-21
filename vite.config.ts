@@ -43,11 +43,13 @@ export default defineConfig(({ mode }) => {
         theme_color: '#00FF00',
         background_color: '#000000',
         display: 'standalone',
+        lang: 'pt-BR',
         orientation: 'portrait',
 
-        // ✅ alinhar com o base
+// ✅ PWA + HashRouter: start_url precisa incluir "#/" senão abre sem hash
         scope: normalizedBase,
-        start_url: normalizedBase,
+        start_url: `${normalizedBase}#/`,
+
 
         icons: [
           { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
