@@ -91,9 +91,9 @@ function getSessionStorageOrMemory(): Storage {
 }
 
 // =======================================
-// ✅ fetch com timeout (evita spinner infinito no PWA)
+// ✅ fetch com timeout (evita spinner infinito no PWA/iOS)
 // =======================================
-const DEFAULT_FETCH_TIMEOUT_MS = 30000;
+const DEFAULT_FETCH_TIMEOUT_MS = 25000;
 
 function fetchWithTimeout(
   input: RequestInfo | URL,
@@ -114,13 +114,23 @@ function fetchWithTimeout(
     ...(init || {}),
     cache: 'no-store',
     signal: controller.signal,
-  }).finally(() => clearTimeout(timer));
+  })
+    .catch((err) => {
+      // ✅ Log útil para entender travas no iOS
+      const name = (err && (err.name as string)) || '';
+      if (name === 'AbortError') {
+        console.warn('⏱️ Supabase fetch aborted by timeout', { input });
+      } else {
+        console.warn('🌐 Supabase fetch error', { input, err });
+      }
+      throw err;
+    })
+    .finally(() => clearTimeout(timer));
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     // ✅ OAuth Google + GitHub Pages + HashRouter (#)
-    // Mantém implicit + detectSessionInUrl, pois o callback pode cair com hash.
     flowType: 'implicit',
     detectSessionInUrl: true,
 
@@ -149,25 +159,54 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 // ✅ Refresh controlado (PWA / mobile safe)
 // =======================================
 
-async function safeRefreshIfNeeded() {
+let __refreshRunning = false;
+let __lastWakeAt = 0;
+
+// Evita spam ao alternar apps (WhatsApp <-> PWA)
+const WAKE_THROTTLE_MS = 6000;
+
+async function safeRefreshIfNeeded(reason: string) {
+  if (__refreshRunning) return;
+
+  const now = Date.now();
+  if (now - __lastWakeAt < WAKE_THROTTLE_MS) return;
+  __lastWakeAt = now;
+
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
+  __refreshRunning = true;
   try {
     const { data } = await supabase.auth.getSession();
     const session = data.session;
-
     if (!session) return;
 
-    // Se expira em breve, força refresh
     const expiresAtMs = (session.expires_at || 0) * 1000;
-    const now = Date.now();
-    const willExpireSoon = expiresAtMs > 0 && expiresAtMs - now < 2 * 60 * 1000; // 2 min
+    const now2 = Date.now();
 
-    if (willExpireSoon) {
+    // Se expirou ou expira em breve, força refresh
+    const willExpireSoon = expiresAtMs > 0 && expiresAtMs - now2 < 2 * 60 * 1000; // 2 min
+    const alreadyExpired = expiresAtMs > 0 && expiresAtMs <= now2;
+
+    if (alreadyExpired || willExpireSoon) {
+      console.info(`🔐 supabase refreshSession (${reason})`);
       await supabase.auth.refreshSession();
     }
   } catch (e) {
     // Não derruba UI
-    console.warn('⚠️ safeRefreshIfNeeded falhou (sem derrubar UI):', e);
+    console.warn(`⚠️ safeRefreshIfNeeded falhou (${reason}) (sem derrubar UI):`, e);
+  } finally {
+    __refreshRunning = false;
   }
+}
+
+/**
+ * ✅ Exportado para o Step 3 (auto-sync)
+ * Use quando o app voltar do background:
+ * - “acorda” sessão
+ * - tenta refresh se precisar
+ */
+export async function wakeSupabase(reason: string = 'wake') {
+  await safeRefreshIfNeeded(reason);
 }
 
 // ✅ Mantém sessão viva enquanto app está ABERTO e VISÍVEL (especialmente admin).
@@ -177,7 +216,7 @@ function startVisibleRefreshLoop() {
   if (refreshTimer) return;
   refreshTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible') {
-      void safeRefreshIfNeeded();
+      void safeRefreshIfNeeded('visible-loop');
     }
   }, 60000);
 }
@@ -192,14 +231,25 @@ function stopVisibleRefreshLoop() {
 function setupRefreshListeners() {
   // Quando volta pro app/aba, garante refresh
   window.addEventListener('focus', () => {
-    void safeRefreshIfNeeded();
+    void safeRefreshIfNeeded('focus');
   });
 
   // No PWA, visibilitychange é essencial (minimizou/voltou)
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      void safeRefreshIfNeeded();
+      void safeRefreshIfNeeded('visibility->visible');
     }
+  });
+
+  // Safari/iOS: volta do WhatsApp às vezes vem via bfcache
+  window.addEventListener('pageshow', (e: PageTransitionEvent) => {
+    const persisted = (e as any).persisted ? 'bfcache' : 'normal';
+    void safeRefreshIfNeeded(`pageshow:${persisted}`);
+  });
+
+  // Quando a rede volta (muito comum depois de alternar apps)
+  window.addEventListener('online', () => {
+    void safeRefreshIfNeeded('online');
   });
 
   if (document.visibilityState === 'visible') startVisibleRefreshLoop();
@@ -208,6 +258,9 @@ function setupRefreshListeners() {
     if (document.visibilityState === 'visible') startVisibleRefreshLoop();
     else stopVisibleRefreshLoop();
   });
+
+  // Primeira tentativa após carregar
+  void safeRefreshIfNeeded('startup');
 }
 
 // ✅ HMR/DEV GUARD: evita duplicar listeners/intervalos no Vite dev

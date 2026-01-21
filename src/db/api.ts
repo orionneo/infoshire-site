@@ -195,9 +195,9 @@ export async function createServiceOrder(order: {
   }>;
 }): Promise<ServiceOrder> {
   // ✅ Sempre gera ID no client: permite idempotência e fallback offline
-  const id = uuid();
+  const id = crypto.randomUUID();
 
-  // Se estiver offline (ou conexão "fake online"), já enfileira para sincronizar depois.
+  // Se estiver offline, salva na fila e retorna otimista (sem travar UI)
   if (!isOnlineNow()) {
     await addOfflineTask({
       type: 'CREATE_SERVICE_ORDER',
@@ -207,16 +207,16 @@ export async function createServiceOrder(order: {
         equipment: order.equipment,
         serial_number: order.serial_number ?? undefined,
         entry_date: order.entry_date || new Date().toISOString(),
-        equipment_photo_url: order.equipment_photo_url ?? null,
+        equipment_photo_url: order.equipment_photo_url ?? undefined,
         problem_description: order.problem_description,
-        // ✅ string | undefined (evita erro de tipo)
         estimated_completion: order.estimated_completion ?? undefined,
         has_multiple_items: order.has_multiple_items || false,
-        items: order.items?.map((it) => ({
-          equipment: it.equipment,
-          serial_number: it.serial_number ?? undefined,
-          description: it.description ?? undefined,
-        })) ?? [],
+        items:
+          order.items?.map((it) => ({
+            equipment: it.equipment,
+            serial_number: it.serial_number ?? undefined,
+            description: it.description ?? undefined,
+          })) ?? [],
       },
     });
 
@@ -245,68 +245,74 @@ export async function createServiceOrder(order: {
   }
 
   try {
-    // 1) Número da OS (online-only) — com timeout hard (evita spinner infinito)
-    const { data: orderNumber, error: numberError } = await withTimeout(
-      supabase.rpc('generate_order_number'),
-      20000,
-      'generate_order_number'
-    );
-    if (numberError) throw numberError;
-
-    // 2) Cria OS com ID gerado no client (idempotente)
-    const { data, error } = await withTimeout(
-      supabase
-        .from('service_orders')
-        .insert({
-          id,
-          client_id: order.client_id,
-          equipment: order.equipment,
-          serial_number: order.serial_number,
-          entry_date: order.entry_date || new Date().toISOString(),
-          equipment_photo_url: order.equipment_photo_url,
-          problem_description: order.problem_description,
-          estimated_completion: order.estimated_completion,
-          has_multiple_items: order.has_multiple_items || false,
-          order_number: orderNumber,
-        })
-        .select()
-        .single(),
-      20000,
-      'insert service_orders'
-    );
-    if (error) throw error;
-
-    // 3) Histórico inicial
-    const { data: userRes, error: userErr } = await withTimeout(
-      supabase.auth.getUser(),
-      15000,
-      'auth.getUser'
-    );
-    if (userErr) throw userErr;
-
-    const createdBy = userRes.user?.id ?? order.client_id;
-
-    await withTimeout(
-      createOrderStatusHistory({
-        order_id: data.id,
-        status: 'received',
-        notes: 'Ordem de serviço criada',
-        created_by: createdBy,
-      }),
-      15000,
-      'createOrderStatusHistory'
-    );
-
-    // 4) Itens adicionais
-    if (order.items && order.items.length > 0) {
-      await withTimeout(
-        createServiceOrderItems(data.id, order.items),
+    const onlineWork = async () => {
+      // 1) Número da OS (online-only) — com timeout hard (evita spinner infinito)
+      const { data: orderNumber, error: numberError } = await withTimeout(
+        supabase.rpc('generate_order_number'),
         20000,
-        'createServiceOrderItems'
+        'generate_order_number'
       );
-    }
+      if (numberError) throw numberError;
 
-    return data;
+      // 2) Cria OS com ID gerado no client (idempotente)
+      const { data, error } = await withTimeout(
+        supabase
+          .from('service_orders')
+          .insert({
+            id,
+            client_id: order.client_id,
+            equipment: order.equipment,
+            serial_number: order.serial_number,
+            entry_date: order.entry_date || new Date().toISOString(),
+            equipment_photo_url: order.equipment_photo_url,
+            problem_description: order.problem_description,
+            estimated_completion: order.estimated_completion,
+            has_multiple_items: order.has_multiple_items || false,
+            order_number: orderNumber,
+          })
+          .select()
+          .single(),
+        20000,
+        'insert service_orders'
+      );
+      if (error) throw error;
+
+      // 3) Histórico inicial
+      const { data: userRes, error: userErr } = await withTimeout(
+        supabase.auth.getUser(),
+        15000,
+        'auth.getUser'
+      );
+      if (userErr) throw userErr;
+
+      const createdBy = userRes.user?.id ?? order.client_id;
+
+      await withTimeout(
+        createOrderStatusHistory({
+          order_id: data.id,
+          status: 'received',
+          notes: 'Ordem de serviço criada',
+          created_by: createdBy,
+        }),
+        15000,
+        'createOrderStatusHistory'
+      );
+
+      // 4) Itens adicionais
+      if (order.items && order.items.length > 0) {
+        await withTimeout(
+          createServiceOrderItems(data.id, order.items),
+          20000,
+          'createServiceOrderItems'
+        );
+      }
+
+      return data;
+    };
+
+    // ✅ Watchdog global: em iOS/PWA, requests podem ficar pendentes ao alternar apps.
+    // Isso garante que NUNCA ficaremos com UI presa em “Criando...” indefinidamente.
+    return await withTimeout(onlineWork(), 60000, 'createServiceOrder(overall)');
   } catch (err: any) {
     // ✅ Se travar/rede ruim, cai no offline (não deixa a UI eternamente em "Criando...")
     console.warn('⚠️ createServiceOrder falhou — salvando offline:', err);
@@ -319,16 +325,16 @@ export async function createServiceOrder(order: {
         equipment: order.equipment,
         serial_number: order.serial_number ?? undefined,
         entry_date: order.entry_date || new Date().toISOString(),
-        equipment_photo_url: order.equipment_photo_url ?? null,
+        equipment_photo_url: order.equipment_photo_url ?? undefined,
         problem_description: order.problem_description,
-        // ✅ string | undefined
         estimated_completion: order.estimated_completion ?? undefined,
         has_multiple_items: order.has_multiple_items || false,
-        items: order.items?.map((it) => ({
-          equipment: it.equipment,
-          serial_number: it.serial_number ?? undefined,
-          description: it.description ?? undefined,
-        })) ?? [],
+        items:
+          order.items?.map((it) => ({
+            equipment: it.equipment,
+            serial_number: it.serial_number ?? undefined,
+            description: it.description ?? undefined,
+          })) ?? [],
       },
     });
 
@@ -355,6 +361,7 @@ export async function createServiceOrder(order: {
     } as ServiceOrder;
   }
 }
+
 
 
 export async function updateServiceOrder(
