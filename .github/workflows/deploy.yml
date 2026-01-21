@@ -17,6 +17,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,19 +33,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        env:
-          VITE_BASE_PATH: /
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-
-          # ✅ Buckets Supabase Storage (NÃO hardcode no código)
-          VITE_ORDER_IMAGES_BUCKET: ${{ secrets.VITE_ORDER_IMAGES_BUCKET }}
-          VITE_MESSAGE_IMAGES_BUCKET: ${{ secrets.VITE_MESSAGE_IMAGES_BUCKET }}
-          VITE_EQUIPMENT_PHOTOS_BUCKET: ${{ secrets.VITE_EQUIPMENT_PHOTOS_BUCKET }}
-        run: npm run build
-
-
       - name: Verify secrets are available (safe)
         run: |
           test -n "${{ secrets.VITE_SUPABASE_URL }}" || (echo "Missing VITE_SUPABASE_URL" && exit 1)
@@ -50,15 +40,23 @@ jobs:
           test -n "${{ secrets.VITE_ORDER_IMAGES_BUCKET }}" || (echo "Missing VITE_ORDER_IMAGES_BUCKET" && exit 1)
           test -n "${{ secrets.VITE_MESSAGE_IMAGES_BUCKET }}" || (echo "Missing VITE_MESSAGE_IMAGES_BUCKET" && exit 1)
           test -n "${{ secrets.VITE_EQUIPMENT_PHOTOS_BUCKET }}" || (echo "Missing VITE_EQUIPMENT_PHOTOS_BUCKET" && exit 1)
-
           echo "Secrets OK ✅"
+
+      - name: Build
+        env:
+          VITE_BASE_PATH: /
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_ORDER_IMAGES_BUCKET: ${{ secrets.VITE_ORDER_IMAGES_BUCKET }}
+          VITE_MESSAGE_IMAGES_BUCKET: ${{ secrets.VITE_MESSAGE_IMAGES_BUCKET }}
+          VITE_EQUIPMENT_PHOTOS_BUCKET: ${{ secrets.VITE_EQUIPMENT_PHOTOS_BUCKET }}
+        run: npm run build
 
       - name: SPA fallback for GitHub Pages
         run: cp dist/index.html dist/404.html
 
       - name: Add CNAME for custom domain
         run: echo "www.infoshire.com.br" > dist/CNAME
-
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
