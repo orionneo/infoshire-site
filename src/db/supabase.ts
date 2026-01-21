@@ -1,18 +1,14 @@
 import { createClient } from '@supabase/supabase-js';
 
 // ================================
-// 🔒 Memory Lock com timeout SAFE
-// Evita travamento eterno (Safari / PWA / background)
+// 🔒 Memory Lock "NO-THROW" (SAFE)
+// - Nunca rejeita por timeout de acquire
+// - Se detectar deadlock, reseta a fila e segue
+// - Sempre libera a fila
 // ================================
 
 let __lockQueue: Promise<void> = Promise.resolve();
 
-/**
- * Lock em memória compatível com Supabase LockFunc
- * - Aplica timeout no "acquire" (esperar a fila)
- * - Se detectar deadlock, reseta a fila
- * - Nunca deixa a fila presa
- */
 export const memoryLock = async <T>(
   _key: string,
   acquireTimeout: number,
@@ -20,31 +16,30 @@ export const memoryLock = async <T>(
 ): Promise<T> => {
   const timeoutMs = Math.max(5000, Number(acquireTimeout || 15000));
 
-  // 1) Espera sua vez na fila, mas com timeout.
-  let acquireTimer: any;
-  try {
-    await Promise.race([
-      __lockQueue,
-      new Promise<void>((_, reject) => {
-        acquireTimer = setTimeout(() => {
-          reject(new Error(`memoryLock timeout after ${timeoutMs}ms`));
-        }, timeoutMs);
-      }),
-    ]);
-  } catch (e) {
-    // ✅ Deadlock: alguém antes travou. Quebra a fila para não condenar o app.
-    console.warn('⚠️ memoryLock acquire deadlock detected — resetting lock queue:', e);
+  // 1) Espera sua vez na fila, mas NÃO joga erro.
+  // Se travar, reseta a fila e continua.
+  let timedOut = false;
+  await Promise.race([
+    __lockQueue,
+    new Promise<void>((resolve) => {
+      setTimeout(() => {
+        timedOut = true;
+        resolve();
+      }, timeoutMs);
+    }),
+  ]);
+
+  if (timedOut) {
+    console.warn(`⚠️ memoryLock acquire timed out after ${timeoutMs}ms — resetting lock queue`);
     __lockQueue = Promise.resolve();
-  } finally {
-    clearTimeout(acquireTimer);
   }
 
-  // 2) Executa o trabalho (não precisa timeout aqui; o acquire já impede infinito).
+  // 2) Executa o trabalho.
   const run = (async () => {
     return await fn();
   })();
 
-  // 3) Garante que a fila SEMPRE libera, mesmo com erro.
+  // 3) Garante liberação da fila SEMPRE.
   __lockQueue = run.then(
     () => undefined,
     () => undefined
