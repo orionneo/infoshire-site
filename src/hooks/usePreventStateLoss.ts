@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
-import { safeLocalStorage, safeStorage } from '@/utils/safeStorage';
+import { safeLocalStorage } from '@/utils/safeStorage';
+import { secureTabStorage } from '@/utils/secureTabStorage';
 
 /**
  * Hook para prevenir perda de estado quando o app é minimizado no mobile
@@ -16,13 +17,13 @@ export function usePreventStateLoss<T>(
     if (!enabled) return;
 
     // Tentar restaurar estado salvo ao montar o componente
-    const savedState = safeStorage.getItem(`state_${key}`);
+    const savedState = secureTabStorage.getItem(`state_${key}`);
     if (savedState) {
       try {
         const parsed = JSON.parse(savedState);
         setState(parsed);
         // Limpar após restaurar
-        safeStorage.removeItem(`state_${key}`);
+        secureTabStorage.removeItem(`state_${key}`);
       } catch (error) {
         console.error('Erro ao restaurar estado:', error);
       }
@@ -33,7 +34,7 @@ export function usePreventStateLoss<T>(
       if (document.hidden) {
         // Página está sendo minimizada/escondida
         try {
-          safeStorage.setItem(`state_${key}`, JSON.stringify(state));
+          secureTabStorage.setItem(`state_${key}`, JSON.stringify(state));
         } catch (error) {
           console.error('Erro ao salvar estado:', error);
         }
@@ -43,7 +44,7 @@ export function usePreventStateLoss<T>(
     // Salvar estado antes da página ser descarregada
     const handleBeforeUnload = () => {
       try {
-        safeStorage.setItem(`state_${key}`, JSON.stringify(state));
+        secureTabStorage.setItem(`state_${key}`, JSON.stringify(state));
       } catch (error) {
         console.error('Erro ao salvar estado:', error);
       }

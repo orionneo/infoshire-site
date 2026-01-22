@@ -31,7 +31,7 @@ import {
   uploadOrderImage,
 } from '@/db/api';
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
-import { safeStorage } from '@/utils/safeStorage';
+import { secureTabStorage } from '@/utils/secureTabStorage';
 import { useToast } from '@/hooks/use-toast';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
 
@@ -115,7 +115,7 @@ export default function AdminOrders() {
   useEffect(() => {
     if (!dialogOpen) return;
 
-    const savedDraft = safeStorage.getItem(FORM_DRAFT_KEY);
+    const savedDraft = secureTabStorage.getItem(FORM_DRAFT_KEY);
     if (savedDraft) {
       try {
         const draft = JSON.parse(savedDraft);
@@ -163,7 +163,7 @@ export default function AdminOrders() {
     if (!dialogOpen) return;
 
     const subscription = form.watch((values) => {
-      safeStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(values));
+      secureTabStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(values));
     });
 
     return () => subscription.unsubscribe();
@@ -509,8 +509,8 @@ export default function AdminOrders() {
       });
 
       // ✅ limpa drafts e fecha diálogos
-      safeStorage.removeItem(FORM_DRAFT_KEY);
-      safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
+      secureTabStorage.removeItem(FORM_DRAFT_KEY);
+      secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
 
       setShowConfirmation(false);
       setDialogOpen(false);
@@ -538,8 +538,8 @@ export default function AdminOrders() {
               description: `OS ${existingOrder.order_number || existingOrder.id}`,
             });
 
-            safeStorage.removeItem(FORM_DRAFT_KEY);
-            safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
+            secureTabStorage.removeItem(FORM_DRAFT_KEY);
+            secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
 
             setShowConfirmation(false);
             setDialogOpen(false);
@@ -570,7 +570,7 @@ export default function AdminOrders() {
 
       if (!recovered) {
         // mantém rascunho do form (não apaga)
-        safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
     } finally {
       clearTimeout(watchdog);
@@ -587,7 +587,7 @@ export default function AdminOrders() {
           variant: 'destructive',
         });
         // mantém rascunho do form (não apaga)
-        safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
     }
   };
@@ -968,20 +968,20 @@ export default function AdminOrders() {
                     <Button
                       type="button"
                       variant="outline"
-onClick={() => {
-  sessionStorage.removeItem(FORM_DRAFT_KEY);
-  sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
+                      onClick={() => {
+                        secureTabStorage.removeItem(FORM_DRAFT_KEY);
+                        secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
 
-  setShowConfirmation(false);
-  setDialogOpen(false);
+                        setShowConfirmation(false);
+                        setDialogOpen(false);
 
-  form.reset();
-  setIsNewClient(false);
-  setHasMultipleItems(false);
-  setAdditionalItems([]);
-  setSelectedImages([]);
-  setPendingOrderData(null);
-}}
+                        form.reset();
+                        setIsNewClient(false);
+                        setHasMultipleItems(false);
+                        setAdditionalItems([]);
+                        setSelectedImages([]);
+                        setPendingOrderData(null);
+                      }}
                     >
                       Cancelar
                     </Button>
