@@ -413,10 +413,12 @@ export default function AdminOrders() {
     setCreating(true);
     const orderNumber = generateOrderNumber();
     const abortController = new AbortController();
+    const shouldAbortOnVisibility = !location.pathname.startsWith('/admin');
     let didAbortFromVisibility = false;
     let didAbortNotify = false;
 
     const handleVisibilityChange = () => {
+      if (!shouldAbortOnVisibility) return;
       if (document.visibilityState === 'hidden' && !abortController.signal.aborted) {
         didAbortFromVisibility = true;
         abortController.abort();
@@ -424,14 +426,17 @@ export default function AdminOrders() {
     };
 
     const handlePageHide = () => {
+      if (!shouldAbortOnVisibility) return;
       if (!abortController.signal.aborted) {
         didAbortFromVisibility = true;
         abortController.abort();
       }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('pagehide', handlePageHide);
+    if (shouldAbortOnVisibility) {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+      window.addEventListener('pagehide', handlePageHide);
+    }
 
     // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
     const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
@@ -569,8 +574,10 @@ export default function AdminOrders() {
       }
     } finally {
       clearTimeout(watchdog);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('pagehide', handlePageHide);
+      if (shouldAbortOnVisibility) {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+        window.removeEventListener('pagehide', handlePageHide);
+      }
       setCreating(false);
       if (didAbortFromVisibility && !didAbortNotify) {
         toast({
