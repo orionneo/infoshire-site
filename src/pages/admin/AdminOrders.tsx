@@ -31,6 +31,7 @@ import {
   uploadOrderImage,
 } from '@/db/api';
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
+import { safeStorage } from '@/utils/safeStorage';
 import { useToast } from '@/hooks/use-toast';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
 
@@ -111,12 +112,12 @@ export default function AdminOrders() {
   });
 
   // Restaurar rascunho do formulário ao abrir o diálogo
-useEffect(() => {
+  useEffect(() => {
     if (!dialogOpen) return;
 
-    try {
-      const savedDraft = sessionStorage.getItem(FORM_DRAFT_KEY);
-      if (savedDraft) {
+    const savedDraft = safeStorage.getItem(FORM_DRAFT_KEY);
+    if (savedDraft) {
+      try {
         const draft = JSON.parse(savedDraft);
         form.reset(draft);
         toast({
@@ -124,9 +125,9 @@ useEffect(() => {
           description: 'Seus dados foram recuperados automaticamente',
         });
         return;
+      } catch (error) {
+        console.warn('Erro ao restaurar rascunho:', error);
       }
-    } catch (error) {
-      console.error('Erro ao restaurar rascunho:', error);
     }
 
     // ✅ Novo formulário: garante que não “herda” dados da última OS
@@ -162,11 +163,7 @@ useEffect(() => {
     if (!dialogOpen) return;
 
     const subscription = form.watch((values) => {
-      try {
-        sessionStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(values));
-      } catch (error) {
-        console.error('Erro ao salvar rascunho:', error);
-      }
+      safeStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(values));
     });
 
     return () => subscription.unsubscribe();
@@ -527,8 +524,8 @@ useEffect(() => {
       });
 
       // ✅ limpa drafts e fecha diálogos
-      sessionStorage.removeItem(FORM_DRAFT_KEY);
-      sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
+      safeStorage.removeItem(FORM_DRAFT_KEY);
+      safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
 
       setShowConfirmation(false);
       setDialogOpen(false);
@@ -556,8 +553,8 @@ useEffect(() => {
               description: `OS ${existingOrder.order_number || existingOrder.id}`,
             });
 
-            sessionStorage.removeItem(FORM_DRAFT_KEY);
-            sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
+            safeStorage.removeItem(FORM_DRAFT_KEY);
+            safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
 
             setShowConfirmation(false);
             setDialogOpen(false);
@@ -588,7 +585,7 @@ useEffect(() => {
 
       if (!recovered) {
         // mantém rascunho do form (não apaga)
-        sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
     } finally {
       clearTimeout(watchdog);
@@ -603,7 +600,7 @@ useEffect(() => {
           variant: 'destructive',
         });
         // mantém rascunho do form (não apaga)
-        sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
     }
   };
