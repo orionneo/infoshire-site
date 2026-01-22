@@ -247,10 +247,151 @@ export async function createServiceOrder(
   },
   options: CreateServiceOrderOptions = {}
 ): Promise<ServiceOrder> {
-  // TODO: implementar (o corpo foi removido durante correções de merge)
-  // Evita quebrar o build enquanto você cola a implementação final
-  console.warn('createServiceOrder stub called', { order, options });
-  throw new Error('createServiceOrder ainda não implementada neste arquivo');
+  // ✅ Sempre gera ID no client: permite idempotência e fallback offline
+  const id = crypto.randomUUID();
+
+  const allowOfflineQueue = options.allowOfflineQueue !== false; // default = true
+  const overallTimeoutMs = options.timeoutMs ?? 60000;
+
+  const buildOfflinePayload = () => ({
+    id,
+    client_id: order.client_id,
+    equipment: order.equipment,
+    serial_number: order.serial_number ?? undefined,
+    entry_date: order.entry_date || new Date().toISOString(),
+    equipment_photo_url: order.equipment_photo_url ?? undefined,
+    problem_description: order.problem_description,
+    estimated_completion: order.estimated_completion ?? undefined,
+    has_multiple_items: order.has_multiple_items || false,
+    items:
+      order.items?.map((it) => ({
+        equipment: it.equipment,
+        serial_number: it.serial_number ?? undefined,
+        description: it.description ?? undefined,
+      })) ?? [],
+  });
+
+  const buildOptimisticOrder = (label: 'PENDENTE (OFFLINE)' | 'PENDENTE (SINCRONIZANDO)') =>
+    ({
+      id,
+      order_number: label,
+      client_id: order.client_id,
+      equipment: order.equipment,
+      serial_number: order.serial_number ?? undefined,
+      entry_date: order.entry_date || new Date().toISOString(),
+      equipment_photo_url: order.equipment_photo_url ?? null,
+      problem_description: order.problem_description,
+      status: 'received',
+      estimated_completion: order.estimated_completion ?? null,
+      completed_at: null,
+      labor_cost: null,
+      parts_cost: null,
+      total_cost: null,
+      budget_approved: false,
+      approved_at: null,
+      approval_token: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    } as ServiceOrder);
+
+  // ✅ Função ONLINE real (igual sua lógica)
+  const onlineWork = async () => {
+    // 1) Número da OS (online-only) — com retry inteligente
+    const orderNumber = await generateOrderNumberFast();
+
+    // 2) Cria OS com ID gerado no client (idempotente)
+    const { data, error } = await withTimeout(
+      supabase
+        .from('service_orders')
+        .insert({
+          id,
+          client_id: order.client_id,
+          equipment: order.equipment,
+          serial_number: order.serial_number,
+          entry_date: order.entry_date || new Date().toISOString(),
+          equipment_photo_url: order.equipment_photo_url,
+          problem_description: order.problem_description,
+          estimated_completion: order.estimated_completion,
+          has_multiple_items: order.has_multiple_items || false,
+          order_number: orderNumber,
+        })
+        .select()
+        .single(),
+      20000,
+      'insert service_orders'
+    );
+    if (error) throw error;
+
+    // 3) Histórico inicial
+    const { data: userRes, error: userErr } = await withTimeout(
+      supabase.auth.getUser(),
+      15000,
+      'auth.getUser'
+    );
+    if (userErr) throw userErr;
+
+    const createdBy = userRes.user?.id ?? order.client_id;
+
+    await withTimeout(
+      createOrderStatusHistory({
+        order_id: data.id,
+        status: 'received',
+        notes: 'Ordem de serviço criada',
+        created_by: createdBy,
+      }),
+      15000,
+      'createOrderStatusHistory'
+    );
+
+    // 4) Itens adicionais
+    if (order.items && order.items.length > 0) {
+      await withTimeout(
+        createServiceOrderItems(data.id, order.items),
+        20000,
+        'createServiceOrderItems'
+      );
+    }
+
+    return data;
+  };
+
+  // =========================================================
+  // ✅ MODO ADMIN: não usa fila offline nunca
+  // =========================================================
+  if (!allowOfflineQueue) {
+    if (!isOnlineNow()) {
+      const e: any = new Error('Sem conexão no momento (ADMIN).');
+      e.code = 'ADMIN_OFFLINE';
+      throw e;
+    }
+
+    return await withTimeout(onlineWork(), overallTimeoutMs, 'createServiceOrder(ADMIN overall)');
+  }
+
+  // =========================================================
+  // ✅ MODO NORMAL (offline-first): comportamento antigo
+  // =========================================================
+  if (!isOnlineNow()) {
+    await addOfflineTask({
+      type: 'CREATE_SERVICE_ORDER',
+      payload: buildOfflinePayload(),
+    });
+
+    return buildOptimisticOrder('PENDENTE (OFFLINE)');
+  }
+
+  try {
+    return await withTimeout(onlineWork(), overallTimeoutMs, 'createServiceOrder(overall)');
+  } catch (err: any) {
+    console.warn('⚠️ createServiceOrder falhou — salvando offline:', err);
+
+    await addOfflineTask({
+      type: 'CREATE_SERVICE_ORDER',
+      payload: buildOfflinePayload(),
+    });
+
+    return buildOptimisticOrder('PENDENTE (SINCRONIZANDO)');
+  }
 }
 
 export async function updateServiceOrder(

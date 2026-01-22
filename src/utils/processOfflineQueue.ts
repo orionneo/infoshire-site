@@ -1,5 +1,5 @@
 // src/utils/processOfflineQueue.ts
-import { supabase } from '@/db/supabase';
+import { supabase, wakeSupabase } from '@/db/supabase';
 import { getMessageImagesBucket, getOrderImagesBucket } from '@/db/storage';
 import {
   getPendingTasks,
