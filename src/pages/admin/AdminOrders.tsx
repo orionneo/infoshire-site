@@ -40,6 +40,7 @@ import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types
 // Chave para salvar o rascunho do formulário
 const FORM_DRAFT_KEY = 'admin_order_form_draft';
 const PENDING_CONFIRMATION_KEY = 'admin_order_pending_confirmation';
+type OrderDraft = Record<string, any>;
 type CreatingSession = {
   orderNumber: string;
   startedAt: number;
@@ -65,6 +66,7 @@ export default function AdminOrders() {
   const location = useLocation();
   const { toast } = useToast();
   const creatingSessionRef = useRef<CreatingSession | null>(null);
+  const pendingOrderRef = useRef<OrderDraft | null>(null);
   const resolvingVisibilityRef = useRef(false);
   const [orders, setOrders] = useState<ServiceOrderWithClient[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<ServiceOrderWithClient[]>([]);
@@ -230,6 +232,7 @@ export default function AdminOrders() {
     setAdditionalItems([]);
     setSelectedImages([]);
     setPendingOrderData(null);
+    pendingOrderRef.current = null;
     secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
   }, [form]);
 
@@ -267,14 +270,30 @@ export default function AdminOrders() {
         variant: 'destructive',
       });
 
-      if (pendingOrderData) {
-        safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(pendingOrderData));
+      if (pendingOrderRef.current) {
+        safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(pendingOrderRef.current));
       }
       setPendingOrderData(null);
+      pendingOrderRef.current = null;
       secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
     },
-    [pendingOrderData, toast]
+    [toast]
   );
+
+  const readDraftFromStorage = useCallback(() => {
+    const draftValue =
+      secureTabStorage.getItem(PENDING_CONFIRMATION_KEY) ||
+      secureTabStorage.getItem('ORDER_DRAFT_FALLBACK') ||
+      secureTabStorage.getItem(FORM_DRAFT_KEY);
+    if (!draftValue) return null;
+
+    try {
+      return JSON.parse(draftValue) as OrderDraft;
+    } catch (error) {
+      console.warn('Erro ao restaurar rascunho da OS:', error);
+      return null;
+    }
+  }, []);
 
   const resolveCreationOnVisibility = useCallback(
     async (source: string) => {
@@ -319,21 +338,20 @@ export default function AdminOrders() {
   );
 
   const restorePendingConfirmation = useCallback(() => {
-    const savedPending = secureTabStorage.getItem(PENDING_CONFIRMATION_KEY);
-    if (!savedPending) return;
-
-    try {
-      const pending = JSON.parse(savedPending);
-      setPendingOrderData(pending);
-    } catch (error) {
-      console.warn('Erro ao restaurar confirmação pendente:', error);
+    const pending = readDraftFromStorage();
+    if (!pending) {
       secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+      return;
     }
-  }, []);
+
+    setPendingOrderData(pending);
+    pendingOrderRef.current = pending;
+  }, [readDraftFromStorage]);
 
   const handleConfirmationOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
+        setCreating(false);
         restorePendingConfirmation();
       }
       setShowConfirmation(open);
@@ -343,6 +361,7 @@ export default function AdminOrders() {
 
   const handleConfirmationCancel = useCallback(() => {
     setPendingOrderData(null);
+    pendingOrderRef.current = null;
     secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
     setShowConfirmation(false);
   }, []);
@@ -510,27 +529,14 @@ export default function AdminOrders() {
 
     // Todas as validações passaram - mostrar confirmação
     setPendingOrderData(data);
+    pendingOrderRef.current = data;
+    secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
     secureTabStorage.setItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
     setShowConfirmation(true);
   };
 
   const handleConfirmOrder = async () => {
-    const formValues = form.getValues();
-    const hasFormValues = Object.values(formValues).some((value) => {
-      if (value === null || value === undefined) return false;
-      if (typeof value === 'string') return value.trim().length > 0;
-      return true;
-    });
-    const draftValue = secureTabStorage.getItem(FORM_DRAFT_KEY) || secureTabStorage.getItem('ORDER_DRAFT_FALLBACK');
-    let draft = null;
-    if (draftValue) {
-      try {
-        draft = JSON.parse(draftValue);
-      } catch (error) {
-        console.warn('Erro ao restaurar rascunho da OS:', error);
-      }
-    }
-    const data = hasFormValues ? formValues : draft;
+    const data = pendingOrderRef.current ?? readDraftFromStorage();
 
     if (!data) {
       toast({
@@ -543,6 +549,7 @@ export default function AdminOrders() {
     }
 
     setPendingOrderData(data);
+    pendingOrderRef.current = data;
 
     const hasFreshSession = await ensureFreshSession();
     if (!hasFreshSession) {
