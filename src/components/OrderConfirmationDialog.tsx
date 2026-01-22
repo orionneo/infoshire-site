@@ -38,6 +38,7 @@ interface OrderConfirmationDialogProps {
   onOpenChange: (open: boolean) => void;
   data: OrderConfirmationData;
   onConfirm: () => void;
+  onCancel?: () => void;
   loading?: boolean;
 }
 
@@ -46,6 +47,7 @@ export function OrderConfirmationDialog({
   onOpenChange,
   data,
   onConfirm,
+  onCancel,
   loading = false,
 }: OrderConfirmationDialogProps) {
   const {
@@ -313,7 +315,10 @@ export function OrderConfirmationDialog({
           <Button
             type="button"
             variant="outline"
-            onClick={() => onOpenChange(false)}
+            onClick={() => {
+              onCancel?.();
+              onOpenChange(false);
+            }}
             disabled={loading}
           >
             Voltar e Editar
