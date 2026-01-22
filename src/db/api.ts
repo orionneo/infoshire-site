@@ -57,11 +57,17 @@ function withTimeoutVisAware<T>(promiseLike: PromiseLike<T>, ms: number, label: 
     const start = Date.now();
     let settled = false;
     let t: any;
+    let backgrounded = false;
 
     const cleanup = () => {
       settled = true;
       clearTimeout(t);
-      document.removeEventListener('visibilitychange', onVis);
+      document.removeEventListener('visibilitychange', onVisChange);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('freeze', onFreeze);
+      document.removeEventListener('resume', onResume as EventListener);
     };
 
     const fail = (suffix?: string) => {
@@ -70,15 +76,46 @@ function withTimeoutVisAware<T>(promiseLike: PromiseLike<T>, ms: number, label: 
       reject(new Error(`${label} timeout after ${ms}ms${suffix ? ` (${suffix})` : ''}. elapsed=${elapsed}ms`));
     };
 
-    const onVis = () => {
-      // Quando voltar para a aba, checa tempo real decorrido
+    const checkElapsed = (source: string) => {
+      const elapsed = Date.now() - start;
+      if (!settled && elapsed > ms) fail(source);
+    };
+
+    const onReturn = (source: string) => {
       if (document.visibilityState === 'visible') {
-        const elapsed = Date.now() - start;
-        if (!settled && elapsed > ms) fail('backgrounded');
+        checkElapsed(source);
       }
     };
 
-    document.addEventListener('visibilitychange', onVis);
+    const onVisChange = () => {
+      if (document.visibilityState === 'visible') {
+        onReturn('visibility');
+      } else {
+        backgrounded = true;
+      }
+    };
+
+    const onPageShow = () => onReturn('pageshow');
+    const onFocus = () => onReturn('focus');
+    const onPageHide = () => {
+      backgrounded = true;
+    };
+    const onFreeze = () => {
+      backgrounded = true;
+    };
+    const onResume = () => {
+      if (backgrounded) {
+        onReturn('resume');
+        backgrounded = false;
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisChange);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('pagehide', onPageHide);
+    document.addEventListener('freeze', onFreeze);
+    document.addEventListener('resume', onResume as EventListener);
 
     // Timer normal (funciona quando aba está ativa)
     t = setTimeout(() => {

@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Loader2, Plus, Search, Trash2, UserPlus, X, ChevronDown, ChevronUp } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
@@ -28,6 +28,7 @@ import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types
 
 // Chave para salvar o rascunho do formulário
 const FORM_DRAFT_KEY = 'admin_order_form_draft';
+const CREATING_TIMEOUT_MS = 45000;
 
 // Helpers para input type="date" + ISO estável sem bug de timezone
 const toDateInput = (d: Date) => {
@@ -46,6 +47,7 @@ export default function AdminOrders() {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
+  const creatingStartedAtRef = useRef<number | null>(null);
   const [orders, setOrders] = useState<ServiceOrderWithClient[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<ServiceOrderWithClient[]>([]);
   const [clients, setClients] = useState<Profile[]>([]);
@@ -162,15 +164,7 @@ useEffect(() => {
     return () => subscription.unsubscribe();
   }, [dialogOpen, form]);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    filterOrders();
-  }, [orders, searchTerm, statusFilter]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [ordersData, clientsData] = await Promise.all([getAllServiceOrders(), getAllProfiles()]);
 
@@ -204,7 +198,62 @@ useEffect(() => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    filterOrders();
+  }, [orders, searchTerm, statusFilter]);
+
+  useEffect(() => {
+    if (creating) {
+      creatingStartedAtRef.current = Date.now();
+    } else {
+      creatingStartedAtRef.current = null;
+    }
+  }, [creating]);
+
+  useEffect(() => {
+    const checkCreatingTimeout = (source: string) => {
+      if (!creating) return;
+      const startedAt = creatingStartedAtRef.current;
+      if (!startedAt) return;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < CREATING_TIMEOUT_MS) return;
+
+      setCreating(false);
+      loadData();
+      toast({
+        title: 'Tempo excedido',
+        description: `A criação da OS ficou ativa por mais de ${Math.round(CREATING_TIMEOUT_MS / 1000)}s (${source}). Tente novamente.`,
+        variant: 'destructive',
+      });
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkCreatingTimeout('visibilitychange');
+      }
+    };
+    const onPageShow = () => checkCreatingTimeout('pageshow');
+    const onFocus = () => checkCreatingTimeout('focus');
+    const onResume = () => checkCreatingTimeout('resume');
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('resume', onResume as EventListener);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('resume', onResume as EventListener);
+    };
+  }, [creating, loadData, toast]);
 
   const filterOrders = () => {
     let filtered = [...orders];
