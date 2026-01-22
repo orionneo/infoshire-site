@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Loader2, Plus, Search, Trash2, UserPlus, X, ChevronDown, ChevronUp } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { ImageUpload } from '@/components/ui/ImageUpload';
 import { Input } from '@/components/ui/input';
 import { MultipleImageUpload } from '@/components/ui/MultipleImageUpload';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -21,48 +22,17 @@ import { Separator } from '@/components/ui/separator';
 import { SmartInput } from '@/components/ui/SmartInput';
 import { SmartTextarea } from '@/components/ui/SmartTextarea';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  createClientProfile,
-  createServiceOrder,
-  generateOrderNumber,
-  getAllProfiles,
-  getAllServiceOrders,
-  getServiceOrderByOrderNumber,
-  uploadOrderImage,
-} from '@/db/api';
-import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
-import { secureTabStorage } from '@/utils/secureTabStorage';
+import { createClientProfile, createServiceOrder, getAllProfiles, getAllServiceOrders, uploadOrderImage } from '@/db/api';
 import { useToast } from '@/hooks/use-toast';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
 
 // Chave para salvar o rascunho do formulário
 const FORM_DRAFT_KEY = 'admin_order_form_draft';
-type CreatingSession = {
-  orderNumber: string;
-  startedAt: number;
-  opId: string;
-  resolved: boolean;
-};
-
-// Helpers para input type="date" + ISO estável sem bug de timezone
-const toDateInput = (d: Date) => {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-};
-
-const dateInputToLocalISOString = (dateStr: string) => {
-  // Usa meio-dia local para não “virar dia” em UTC
-  const d = new Date(`${dateStr}T12:00:00`);
-  const tzAdjusted = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return tzAdjusted.toISOString();
-};
 
 export default function AdminOrders() {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
-  const creatingSessionRef = useRef<CreatingSession | null>(null);
-  const resolvingVisibilityRef = useRef(false);
   const [orders, setOrders] = useState<ServiceOrderWithClient[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<ServiceOrderWithClient[]>([]);
   const [clients, setClients] = useState<Profile[]>([]);
@@ -70,7 +40,7 @@ export default function AdminOrders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-
+  
   // Ler filtros da URL ao carregar
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -79,21 +49,18 @@ export default function AdminOrders() {
       setStatusFilter(status);
     }
   }, [location.search]);
-
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [isNewClient, setIsNewClient] = useState(false);
   const [hasMultipleItems, setHasMultipleItems] = useState(false);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
-  const [additionalItems, setAdditionalItems] = useState<
-    Array<{
-      id: string;
-      equipment: string;
-      serial_number: string;
-      description: string;
-    }>
-  >([]);
+  const [additionalItems, setAdditionalItems] = useState<Array<{
+    id: string;
+    equipment: string;
+    serial_number: string;
+    description: string;
+  }>>([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [pendingOrderData, setPendingOrderData] = useState<any>(null);
 
@@ -106,9 +73,7 @@ export default function AdminOrders() {
       new_client_email: '',
       new_client_phone: '',
       new_client_password: '123456',
-
       // Order fields
-      entry_date: '', // ✅ novo: permite data retroativa
       equipment: '',
       serial_number: '',
       equipment_photo_url: '',
@@ -119,40 +84,21 @@ export default function AdminOrders() {
 
   // Restaurar rascunho do formulário ao abrir o diálogo
   useEffect(() => {
-    if (!dialogOpen) return;
-
-    const savedDraft = secureTabStorage.getItem(FORM_DRAFT_KEY);
-    if (savedDraft) {
+    if (dialogOpen) {
       try {
-        const draft = JSON.parse(savedDraft);
-        form.reset(draft);
-        toast({
-          title: 'Rascunho restaurado',
-          description: 'Seus dados foram recuperados automaticamente',
-        });
-        return;
+        const savedDraft = sessionStorage.getItem(FORM_DRAFT_KEY);
+        if (savedDraft) {
+          const draft = JSON.parse(savedDraft);
+          form.reset(draft);
+          toast({
+            title: 'Rascunho restaurado',
+            description: 'Seus dados foram recuperados automaticamente',
+          });
+        }
       } catch (error) {
-        console.warn('Erro ao restaurar rascunho:', error);
+        console.error('Erro ao restaurar rascunho:', error);
       }
     }
-
-    // ✅ Novo formulário: garante que não “herda” dados da última OS
-    form.reset();
-    setIsNewClient(false);
-    setHasMultipleItems(false);
-    setAdditionalItems([]);
-    setSelectedImages([]);
-    setPendingOrderData(null);
-  }, [dialogOpen]);
-
-  // ✅ Garantir default do entry_date = hoje, se não vier do draft
-  useEffect(() => {
-    if (!dialogOpen) return;
-    const current = form.getValues('entry_date');
-    if (!current) {
-      form.setValue('entry_date', toDateInput(new Date()), { shouldDirty: true });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dialogOpen]);
 
   // Check if we should open dialog from navigation state
@@ -162,161 +108,46 @@ export default function AdminOrders() {
       // Clear the state
       navigate(location.pathname, { replace: true, state: {} });
     }
-  }, [location.state, navigate, location.pathname]);
+  }, [location.state]);
 
   // Auto-salvar formulário a cada mudança
   useEffect(() => {
     if (!dialogOpen) return;
 
     const subscription = form.watch((values) => {
-      secureTabStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(values));
+      try {
+        sessionStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(values));
+      } catch (error) {
+        console.error('Erro ao salvar rascunho:', error);
+      }
     });
 
     return () => subscription.unsubscribe();
   }, [dialogOpen, form]);
 
-  const loadData = useCallback(async () => {
-    try {
-      const [ordersData, clientsData] = await Promise.all([getAllServiceOrders(), getAllProfiles()]);
-
-      setOrders(ordersData);
-      setClients(clientsData.filter((c) => c.role === 'client'));
-
-      // ✅ cache para modo offline
-      saveAdminCache({
-        orders: ordersData,
-        clients: clientsData,
-      });
-    } catch (error) {
-      console.error('Erro ao carregar dados:', error);
-
-      // ✅ fallback offline
-      const cache = loadAdminCache();
-      if (cache) {
-        setOrders(cache.orders);
-        setClients(cache.clients.filter((c) => c.role === 'client'));
-        toast({
-          title: 'Modo offline',
-          description: 'Carreguei dados do cache local. Novas OS/imagens serão sincronizadas ao voltar a conexão.',
-        });
-      } else {
-        toast({
-          title: 'Sem conexão',
-          description: 'Você está offline e ainda não existe cache local neste dispositivo.',
-          variant: 'destructive',
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
-
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, []);
 
   useEffect(() => {
     filterOrders();
   }, [orders, searchTerm, statusFilter]);
 
-  const resetCreationForm = useCallback(() => {
-    setShowConfirmation(false);
-    setDialogOpen(false);
-    form.reset();
-    setIsNewClient(false);
-    setHasMultipleItems(false);
-    setAdditionalItems([]);
-    setSelectedImages([]);
-    setPendingOrderData(null);
-  }, [form]);
-
-  const finalizeCreationSuccess = useCallback(
-    async (order: { order_number?: string; id: string }, source: string) => {
-      if (creatingSessionRef.current) {
-        creatingSessionRef.current.resolved = true;
-      }
-
-      setCreating(false);
-      toast({
-        title: 'Ordem criada',
-        description: `OS ${order.order_number || order.id}${source ? ` (${source})` : ''}`,
-      });
-
-      safeStorage.removeItem(FORM_DRAFT_KEY);
-      safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
-
-      resetCreationForm();
-      await loadData();
-    },
-    [loadData, resetCreationForm, toast]
-  );
-
-  const finalizeCreationError = useCallback(
-    (message: string) => {
-      if (creatingSessionRef.current) {
-        creatingSessionRef.current.resolved = true;
-      }
-
-      setCreating(false);
-      toast({
-        title: 'Erro ao criar OS',
-        description: message,
-        variant: 'destructive',
-      });
-
-      if (pendingOrderData) {
-        safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(pendingOrderData));
-      }
-    },
-    [pendingOrderData, toast]
-  );
-
-  const resolveCreationOnVisibility = useCallback(
-    async (source: string) => {
-      if (!creating || resolvingVisibilityRef.current) return;
-      const session = creatingSessionRef.current;
-      if (!session || session.resolved) return;
-
-      resolvingVisibilityRef.current = true;
-      try {
-        const existingOrder = await getServiceOrderByOrderNumber(session.orderNumber);
-        if (existingOrder) {
-          await finalizeCreationSuccess(existingOrder, source);
-        } else {
-          finalizeCreationError(`Não foi possível confirmar a criação da OS ${session.orderNumber}.`);
-        }
-      } catch (lookupError) {
-        console.warn('Falha ao buscar OS por order_number:', lookupError);
-        finalizeCreationError('Não foi possível confirmar a criação da OS ao retornar ao foco.');
-      } finally {
-        resolvingVisibilityRef.current = false;
-      }
-    },
-    [creating, finalizeCreationError, finalizeCreationSuccess]
-  );
-
-  useEffect(() => {
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        void resolveCreationOnVisibility('retorno ao foco');
-      }
-    };
-    const onPageShow = () => void resolveCreationOnVisibility('pageshow');
-    const onFocus = () => void resolveCreationOnVisibility('focus');
-    const onResume = () => void resolveCreationOnVisibility('resume');
-
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    window.addEventListener('pageshow', onPageShow);
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('resume', onResume as EventListener);
-
-    return () => {
-      document.removeEventListener('visibilitychange', onVisibilityChange);
-      window.removeEventListener('pageshow', onPageShow);
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('resume', onResume as EventListener);
-    };
-  }, [resolveCreationOnVisibility]);
+  const loadData = async () => {
+    try {
+      const [ordersData, clientsData] = await Promise.all([
+        getAllServiceOrders(),
+        getAllProfiles(),
+      ]);
+      
+      setOrders(ordersData);
+      setClients(clientsData.filter(c => c.role === 'client'));
+    } catch (error) {
+      console.error('Erro ao carregar dados:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const filterOrders = () => {
     let filtered = [...orders];
@@ -334,9 +165,13 @@ export default function AdminOrders() {
     if (statusFilter !== 'all') {
       // Handle special filters
       if (statusFilter === 'in_progress') {
-        filtered = filtered.filter((order) => ['analyzing', 'in_repair', 'awaiting_parts'].includes(order.status));
+        filtered = filtered.filter((order) => 
+          ['analyzing', 'in_repair', 'awaiting_parts'].includes(order.status)
+        );
       } else if (statusFilter === 'completed') {
-        filtered = filtered.filter((order) => ['completed', 'ready_for_pickup'].includes(order.status));
+        filtered = filtered.filter((order) => 
+          ['completed', 'ready_for_pickup'].includes(order.status)
+        );
       } else {
         filtered = filtered.filter((order) => order.status === statusFilter);
       }
@@ -359,14 +194,20 @@ export default function AdminOrders() {
   };
 
   const removeAdditionalItem = (id: string) => {
-    setAdditionalItems(additionalItems.filter((item) => item.id !== id));
+    setAdditionalItems(additionalItems.filter(item => item.id !== id));
   };
 
   const updateAdditionalItem = (id: string, field: string, value: string) => {
-    setAdditionalItems(additionalItems.map((item) => (item.id === id ? { ...item, [field]: value } : item)));
+    setAdditionalItems(
+      additionalItems.map(item =>
+        item.id === id ? { ...item, [field]: value } : item
+      )
+    );
   };
 
   const onSubmit = async (data: any) => {
+    // Validações básicas antes de mostrar confirmação
+    
     // Validar cliente
     if (!isNewClient && !data.client_id) {
       toast({
@@ -379,13 +220,7 @@ export default function AdminOrders() {
 
     // Validar novo cliente
     if (isNewClient) {
-      if (
-        !data.new_client_first_name ||
-        !data.new_client_last_name ||
-        !data.new_client_email ||
-        !data.new_client_phone ||
-        !data.new_client_password
-      ) {
+      if (!data.new_client_first_name || !data.new_client_last_name || !data.new_client_email || !data.new_client_phone || !data.new_client_password) {
         toast({
           title: 'Erro',
           description: 'Preencha todos os campos obrigatórios do cliente',
@@ -445,7 +280,7 @@ export default function AdminOrders() {
     }
 
     if (hasMultipleItems) {
-      const invalidItems = additionalItems.filter((item) => !item.equipment.trim());
+      const invalidItems = additionalItems.filter(item => !item.equipment.trim());
       if (invalidItems.length > 0) {
         toast({
           title: 'Erro',
@@ -463,221 +298,114 @@ export default function AdminOrders() {
 
   const handleConfirmOrder = async () => {
     if (!pendingOrderData) return;
-
+    
     const data = pendingOrderData;
-
-    const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const startedAt = Date.now();
     setCreating(true);
-    const orderNumber = generateOrderNumber();
-    creatingSessionRef.current = {
-      orderNumber,
-      startedAt,
-      opId,
-      resolved: false,
-    };
-    const abortController = new AbortController();
-    const shouldAbortOnVisibility = !location.pathname.startsWith('/admin');
-    let didAbortFromVisibility = false;
-    let didAbortNotify = false;
-
-    const handleVisibilityChange = () => {
-      if (!shouldAbortOnVisibility) return;
-      if (document.visibilityState === 'hidden' && !abortController.signal.aborted) {
-        didAbortFromVisibility = true;
-        abortController.abort();
-      }
-    };
-
-    const handlePageHide = () => {
-      if (!shouldAbortOnVisibility) return;
-      if (!abortController.signal.aborted) {
-        didAbortFromVisibility = true;
-        abortController.abort();
-      }
-    };
-
-    if (shouldAbortOnVisibility) {
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-      window.addEventListener('pagehide', handlePageHide);
-    }
-
-    // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
-    const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
-    const watchdog = window.setTimeout(() => {
-      if (creatingSessionRef.current?.resolved) {
-        return;
-      }
-      const elapsed = Date.now() - startedAt;
-      console.warn('[OS]', opId, 'WATCHDOG fired', { elapsed, vis: document.visibilityState });
-
-      // ✅ 1) destrava UI IMEDIATAMENTE (não pode depender de await)
-      setCreating(false);
-
-      // ✅ 2) feedback pro usuário
-      toast({
-        title: 'A criação está demorando',
-        description:
-          'Se você trocou de aba, o navegador pode pausar requisições. A criação pode concluir em segundo plano; volte para esta aba para conferir ou tente novamente.',
-        variant: 'destructive',
-      });
-      // ✅ 3) tenta recarregar lista sem bloquear nada
-      void loadData().catch((e) => console.warn('[OS]', opId, 'WATCHDOG loadData failed', e));
-    }, WATCHDOG_MS);
-
+    
     try {
       let clientId = data.client_id;
 
+      // Create new client if needed
       if (isNewClient) {
+        // Combine first and last name
+        const fullName = `${data.new_client_first_name.trim()} ${data.new_client_last_name.trim()}`;
+
         const newClient = await createClientProfile({
-          name: `${data.new_client_first_name} ${data.new_client_last_name}`,
-          email: data.new_client_email,
-          phone: data.new_client_phone,
+          name: fullName,
+          email: data.new_client_email.trim(),
+          phone: data.new_client_phone.trim(),
           password: data.new_client_password,
         });
+
         clientId = newClient.id;
+
+        toast({
+          title: 'Cliente criado',
+          description: `Cliente ${newClient.name} cadastrado com sucesso`,
+        });
       }
 
-      const order = await createServiceOrder(
-        {
-          client_id: clientId,
-          entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
-          equipment: data.equipment,
-          serial_number: data.serial_number,
-          problem_description: data.problem_description,
-          has_multiple_items: hasMultipleItems,
-          order_number: orderNumber,
-          items: hasMultipleItems
-            ? additionalItems.map((it) => ({
-                equipment: it.equipment,
-                serial_number: it.serial_number || undefined,
-                description: it.description || undefined,
-              }))
-            : undefined,
-        },
-        // ✅ ADMIN: timeout curto + vis-aware (NÃO 60s)
-        { allowOfflineQueue: false, timeoutMs: 15000, abortController }
-      );
+      // Criar data de entrada no timezone local (Brasil UTC-3)
+      const now = new Date();
+      const entryDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString();
+      
+      // Calcular data de previsão automática: 3 dias após a entrada (meio-dia UTC para evitar problemas de timezone)
+      const estimatedDate = new Date(now);
+      estimatedDate.setDate(estimatedDate.getDate() + 3);
+      estimatedDate.setHours(12, 0, 0, 0); // Meio-dia UTC
+      const autoEstimatedCompletion = estimatedDate.toISOString();
+      
+      const newOrder = await createServiceOrder({
+        client_id: clientId,
+        equipment: data.equipment,
+        serial_number: data.serial_number || undefined,
+        entry_date: entryDate, // Data/hora atual no timezone local
+        equipment_photo_url: data.equipment_photo_url || undefined,
+        problem_description: data.problem_description,
+        estimated_completion: autoEstimatedCompletion, // Sempre 3 dias após entrada
+        has_multiple_items: hasMultipleItems,
+        items: hasMultipleItems ? additionalItems.map(item => ({
+          equipment: item.equipment,
+          serial_number: item.serial_number || undefined,
+          description: item.description || undefined,
+        })) : undefined,
+      });
 
-      // ✅ Upload de imagens: não “quebra” a criação se falhar upload
+      // Upload múltiplas fotos se houver
       if (selectedImages.length > 0) {
-        for (const file of selectedImages) {
-          try {
-            await uploadOrderImage(order.id, file);
-          } catch (e) {
-            console.warn('Upload falhou (não bloqueia OS):', e);
-          }
+        try {
+          await Promise.all(
+            selectedImages.map((file, index) => 
+              uploadOrderImage(newOrder.id, file, `Foto ${index + 1}`)
+            )
+          );
+          toast({
+            title: 'Fotos enviadas',
+            description: `${selectedImages.length} foto(s) enviada(s) com sucesso`,
+          });
+        } catch (error) {
+          console.error('Erro ao enviar fotos:', error);
+          toast({
+            title: 'Aviso',
+            description: 'OS criada, mas houve erro ao enviar algumas fotos',
+            variant: 'destructive',
+          });
         }
       }
 
       toast({
         title: 'Ordem criada',
-        description: `OS ${order.order_number || order.id}`,
+        description: `OS #${newOrder.order_number} criada com sucesso`,
       });
 
-      // ✅ limpa drafts e fecha diálogos
-      secureTabStorage.removeItem(FORM_DRAFT_KEY);
-      secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-
+      // Limpar rascunho salvo
+      sessionStorage.removeItem(FORM_DRAFT_KEY);
+      
+      // Fechar ambos os diálogos
       setShowConfirmation(false);
       setDialogOpen(false);
-
-      // ✅ reset total do estado
+      
+      // Limpar estados
       form.reset();
       setIsNewClient(false);
       setHasMultipleItems(false);
       setAdditionalItems([]);
       setSelectedImages([]);
       setPendingOrderData(null);
-      if (creatingSessionRef.current?.resolved) {
-        return;
-      }
-
-      await finalizeCreationSuccess(order, '');
-    } catch (err: any) {
-      console.error('❌ Falha ao criar OS:', err);
-
-      let recovered = false;
-      if (!didAbortFromVisibility && err?.name !== 'AbortError' && orderNumber) {
-        try {
-          const existingOrder = await getServiceOrderByOrderNumber(orderNumber);
-          if (existingOrder) {
-            recovered = true;
-            toast({
-              title: 'Ordem criada',
-              description: `OS ${existingOrder.order_number || existingOrder.id}`,
-            });
-
-            secureTabStorage.removeItem(FORM_DRAFT_KEY);
-            secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-
-            setShowConfirmation(false);
-            setDialogOpen(false);
-            form.reset();
-            setIsNewClient(false);
-            setHasMultipleItems(false);
-            setAdditionalItems([]);
-            setSelectedImages([]);
-            setPendingOrderData(null);
-
-            await loadData();
-            if (!creatingSessionRef.current?.resolved) {
-              await finalizeCreationSuccess(existingOrder, 'recuperado');
-            }
-          }
-        } catch (lookupError) {
-          console.warn('Falha ao buscar OS por order_number:', lookupError);
-        }
-      }
-
-      if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError') {
-        toast({
-          title: 'Erro ao criar OS',
-          description:
-            err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
-              ? 'Sem conexão no momento. Verifique internet e tente novamente.'
-              : err?.message || 'Falha inesperada ao criar a OS.',
-          variant: 'destructive',
-        });
-      }
-
-      if (!recovered) {
-        // mantém rascunho do form (não apaga)
-        secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
-      if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError' && !creatingSessionRef.current?.resolved) {
-        finalizeCreationError(
-          err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
-            ? 'Sem conexão no momento. Verifique internet e tente novamente.'
-            : err?.message || 'Falha inesperada ao criar a OS.'
-        );
-      }
+      
+      // Recarregar dados
+      loadData();
+    } catch (error: any) {
+      console.error('Erro ao criar ordem:', error);
+      toast({
+        title: 'Erro',
+        description: error.message || 'Não foi possível criar a ordem',
+        variant: 'destructive',
+      });
     } finally {
-      clearTimeout(watchdog);
-      if (shouldAbortOnVisibility) {
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        window.removeEventListener('pagehide', handlePageHide);
-      }
-      if (!creatingSessionRef.current?.resolved) {
-        setCreating(false);
-      }
-      if (didAbortFromVisibility && !didAbortNotify) {
-        toast({
-          title: 'Criação interrompida em background',
-          description:
-            'A aba foi para segundo plano e a requisição foi cancelada. Verifique a lista de OS; se necessário, tente novamente.',
-          variant: 'destructive',
-        });
-        // mantém rascunho do form (não apaga)
-        secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
-      }
-      if (creatingSessionRef.current?.opId === opId) {
-        creatingSessionRef.current = null;
-      }
+      setCreating(false);
     }
   };
-
-
-
 
   if (loading) {
     return (
@@ -716,7 +444,7 @@ export default function AdminOrders() {
                       <h3 className="text-sm font-semibold">Cliente</h3>
                       <Button
                         type="button"
-                        variant={isNewClient ? 'default' : 'outline'}
+                        variant={isNewClient ? "default" : "outline"}
                         size="sm"
                         onClick={() => setIsNewClient(!isNewClient)}
                       >
@@ -753,7 +481,9 @@ export default function AdminOrders() {
                       />
                     ) : (
                       <div className="space-y-4 p-4 border border-primary/30 rounded-lg bg-card/50">
-                        <p className="text-sm text-muted-foreground">Cadastre um novo cliente para criar a ordem de serviço</p>
+                        <p className="text-sm text-muted-foreground">
+                          Cadastre um novo cliente para criar a ordem de serviço
+                        </p>
                         <div className="grid grid-cols-2 gap-4">
                           <FormField
                             control={form.control}
@@ -800,7 +530,9 @@ export default function AdminOrders() {
                               <FormControl>
                                 <Input type="email" placeholder="cliente@email.com" {...field} />
                               </FormControl>
-                              <FormDescription>O cliente usará este e-mail para fazer login</FormDescription>
+                              <FormDescription>
+                                O cliente usará este e-mail para fazer login
+                              </FormDescription>
                               <FormMessage />
                             </FormItem>
                           )}
@@ -835,7 +567,9 @@ export default function AdminOrders() {
                               <FormControl>
                                 <Input type="password" placeholder="Mínimo 6 caracteres" {...field} />
                               </FormControl>
-                              <FormDescription>Senha para o cliente acessar o sistema</FormDescription>
+                              <FormDescription>
+                                Senha para o cliente acessar o sistema
+                              </FormDescription>
                               <FormMessage />
                             </FormItem>
                           )}
@@ -849,25 +583,6 @@ export default function AdminOrders() {
                   {/* Order Details */}
                   <div className="space-y-4">
                     <h3 className="text-sm font-semibold">Detalhes da Ordem</h3>
-
-                    {/* ✅ NOVO: Data de abertura retroativa */}
-                    <FormField
-                      control={form.control}
-                      name="entry_date"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Data de abertura (pode ser retroativa)</FormLabel>
-                          <FormControl>
-                            <Input type="date" max={toDateInput(new Date())} value={field.value || ''} onChange={field.onChange} />
-                          </FormControl>
-                          <FormDescription>
-                            Você pode registrar uma OS com data anterior. A previsão continua sendo <strong>hoje + 3 dias</strong>.
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
                     <FormField
                       control={form.control}
                       name="equipment"
@@ -876,9 +591,15 @@ export default function AdminOrders() {
                         <FormItem>
                           <FormLabel>Equipamento</FormLabel>
                           <FormControl>
-                            <SmartInput value={field.value} onChange={field.onChange} placeholder="Ex: Notebook, Celular, Computador..." />
+                            <SmartInput
+                              value={field.value}
+                              onChange={field.onChange}
+                              placeholder="Ex: Notebook, Celular, Computador..."
+                            />
                           </FormControl>
-                          <FormDescription>Use as sugestões ou digite o equipamento</FormDescription>
+                          <FormDescription>
+                            Use as sugestões ou digite o equipamento
+                          </FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -892,7 +613,9 @@ export default function AdminOrders() {
                           <FormControl>
                             <Input placeholder="Ex: ABC123456789" {...field} />
                           </FormControl>
-                          <FormDescription>Número de série do equipamento (opcional)</FormDescription>
+                          <FormDescription>
+                            Número de série do equipamento (opcional)
+                          </FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}
@@ -901,8 +624,13 @@ export default function AdminOrders() {
                     {/* Múltiplas fotos do equipamento */}
                     <div className="space-y-2">
                       <FormLabel>Fotos do Equipamento</FormLabel>
-                      <MultipleImageUpload onImagesChange={setSelectedImages} maxImages={10} />
-                      <FormDescription>Adicione múltiplas fotos do equipamento (opcional, máximo 10 fotos)</FormDescription>
+                      <MultipleImageUpload
+                        onImagesChange={setSelectedImages}
+                        maxImages={10}
+                      />
+                      <FormDescription>
+                        Adicione múltiplas fotos do equipamento (opcional, máximo 10 fotos)
+                      </FormDescription>
                     </div>
 
                     {/* Checkbox para múltiplos equipamentos */}
@@ -912,7 +640,9 @@ export default function AdminOrders() {
                         checked={hasMultipleItems}
                         onCheckedChange={(checked) => {
                           setHasMultipleItems(checked as boolean);
-                          if (!checked) setAdditionalItems([]);
+                          if (!checked) {
+                            setAdditionalItems([]);
+                          }
                         }}
                       />
                       <label
@@ -929,9 +659,16 @@ export default function AdminOrders() {
                         <div className="flex items-center justify-between">
                           <div>
                             <h4 className="font-medium">Equipamentos Adicionais</h4>
-                            <p className="text-sm text-muted-foreground">Adicione outros equipamentos/periféricos que o cliente trouxe</p>
+                            <p className="text-sm text-muted-foreground">
+                              Adicione outros equipamentos/periféricos que o cliente trouxe
+                            </p>
                           </div>
-                          <Button type="button" variant="outline" size="sm" onClick={addAdditionalItem}>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={addAdditionalItem}
+                          >
                             <Plus className="h-4 w-4 mr-2" />
                             Adicionar Item
                           </Button>
@@ -947,7 +684,12 @@ export default function AdminOrders() {
                           <div key={item.id} className="space-y-3 p-4 border rounded-lg bg-background">
                             <div className="flex items-center justify-between">
                               <h5 className="font-medium text-sm">Item {index + 1}</h5>
-                              <Button type="button" variant="ghost" size="sm" onClick={() => removeAdditionalItem(item.id)}>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => removeAdditionalItem(item.id)}
+                              >
                                 <Trash2 className="h-4 w-4 text-destructive" />
                               </Button>
                             </div>
@@ -1000,8 +742,7 @@ export default function AdminOrders() {
                             />
                           </FormControl>
                           <FormDescription>
-                            Use as sugestões rápidas, digite livremente ou use o microfone para transcrever por voz. O sistema aprende com
-                            suas descrições.
+                            Use as sugestões rápidas, digite livremente ou use o microfone para transcrever por voz. O sistema aprende com suas descrições.
                           </FormDescription>
                           <FormMessage />
                         </FormItem>
@@ -1026,24 +767,26 @@ export default function AdminOrders() {
                       title="🔍 Buscar Informações Técnicas"
                       description="Busque especificações, problemas comuns e informações técnicas na web"
                       onApplyResult={(insights) => {
+                        // Adicionar insights ao campo de descrição de forma inteligente
                         const currentDesc = form.watch('problem_description') || '';
                         let newDesc = currentDesc;
-
+                        
                         if (currentDesc.trim()) {
+                          // Se já tem conteúdo, adiciona os insights como referência
                           newDesc = `${currentDesc}\n\n📋 Referências:\n${insights}`;
                         } else {
+                          // Se está vazio, usa os insights diretamente
                           newDesc = insights;
                         }
-
+                        
                         form.setValue('problem_description', newDesc);
                       }}
                     />
-
+                    
                     {/* Informação sobre data de previsão automática */}
                     <div className="p-4 border rounded-lg bg-muted/30">
                       <p className="text-sm text-muted-foreground">
-                        ℹ️ A data de previsão será automaticamente definida para <strong>hoje + 3 dias</strong>. Você poderá ajustá-la
-                        posteriormente na página de detalhes da ordem.
+                        ℹ️ A data de previsão será automaticamente definida para <strong>3 dias após a entrada</strong>. Você poderá ajustá-la posteriormente na página de detalhes da ordem.
                       </p>
                     </div>
                   </div>
@@ -1053,18 +796,9 @@ export default function AdminOrders() {
                       type="button"
                       variant="outline"
                       onClick={() => {
-                        secureTabStorage.removeItem(FORM_DRAFT_KEY);
-                        secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-
-                        setShowConfirmation(false);
                         setDialogOpen(false);
-
-                        form.reset();
                         setIsNewClient(false);
-                        setHasMultipleItems(false);
-                        setAdditionalItems([]);
-                        setSelectedImages([]);
-                        setPendingOrderData(null);
+                        form.reset();
                       }}
                     >
                       Cancelar
@@ -1103,10 +837,11 @@ export default function AdminOrders() {
               </Button>
             </div>
           </CardHeader>
-
+          
           <CardContent className="space-y-3">
             {/* Filtros principais - Sempre visíveis */}
             <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+              {/* Botão Todos */}
               <Button
                 variant={statusFilter === 'all' ? 'default' : 'outline'}
                 size="sm"
@@ -1116,63 +851,53 @@ export default function AdminOrders() {
                 <span className="text-2xl">📋</span>
                 <span className="text-xs font-bold leading-none">{orders.length}</span>
               </Button>
-
-              {(['received', 'analyzing', 'awaiting_approval', 'in_repair', 'ready_for_pickup', 'completed'] as OrderStatus[]).map(
-                (status) => {
-                  const config = statusConfig[status];
-                  const count = orders.filter((o) => o.status === status).length;
-                  const isActive = statusFilter === status;
-
-                  return (
-                    <Button
-                      key={status}
-                      variant={isActive ? 'default' : 'outline'}
-                      size="sm"
-                      onClick={() => setStatusFilter(status)}
-                      className="shrink-0 h-16 min-w-[64px] p-2 flex flex-col items-center justify-center gap-1.5"
-                      style={
-                        !isActive
-                          ? {
-                              borderColor: config.borderColor.includes('blue')
-                                ? '#3b82f6'
-                                : config.borderColor.includes('purple')
-                                  ? '#a855f7'
-                                  : config.borderColor.includes('yellow')
-                                    ? '#eab308'
-                                    : config.borderColor.includes('cyan')
-                                      ? '#06b6d4'
-                                      : config.borderColor.includes('red')
-                                        ? '#ef4444'
-                                        : config.borderColor.includes('orange')
-                                          ? '#f97316'
-                                          : config.borderColor.includes('amber')
-                                            ? '#f59e0b'
-                                            : config.borderColor.includes('green')
-                                              ? '#22c55e'
-                                              : config.borderColor.includes('sky')
-                                                ? '#0ea5e9'
-                                                : undefined,
-                              borderWidth: '2px',
-                            }
-                          : undefined
-                      }
-                    >
-                      <span className="text-2xl">{config.icon}</span>
-                      <span className="text-xs font-bold leading-none">{count}</span>
-                    </Button>
-                  );
-                }
-              )}
+              
+              {/* Filtros principais - Apenas os mais importantes */}
+              {(['received', 'analyzing', 'awaiting_approval', 'in_repair', 'ready_for_pickup', 'completed'] as OrderStatus[]).map((status) => {
+                const config = statusConfig[status];
+                const count = orders.filter(o => o.status === status).length;
+                const isActive = statusFilter === status;
+                
+                return (
+                  <Button
+                    key={status}
+                    variant={isActive ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setStatusFilter(status)}
+                    className="shrink-0 h-16 min-w-[64px] p-2 flex flex-col items-center justify-center gap-1.5"
+                    style={
+                      !isActive
+                        ? {
+                            borderColor: config.borderColor.includes('blue') ? '#3b82f6' :
+                                       config.borderColor.includes('purple') ? '#a855f7' :
+                                       config.borderColor.includes('yellow') ? '#eab308' :
+                                       config.borderColor.includes('cyan') ? '#06b6d4' :
+                                       config.borderColor.includes('red') ? '#ef4444' :
+                                       config.borderColor.includes('orange') ? '#f97316' :
+                                       config.borderColor.includes('amber') ? '#f59e0b' :
+                                       config.borderColor.includes('green') ? '#22c55e' :
+                                       config.borderColor.includes('sky') ? '#0ea5e9' : undefined,
+                            borderWidth: '2px'
+                          }
+                        : undefined
+                    }
+                  >
+                    <span className="text-2xl">{config.icon}</span>
+                    <span className="text-xs font-bold leading-none">{count}</span>
+                  </Button>
+                );
+              })}
             </div>
 
-            {/* Filtros adicionais */}
+            {/* Filtros adicionais - Expansível no mobile, sempre visível no desktop */}
             <div className={`${filtersExpanded ? 'block' : 'hidden xl:block'}`}>
               <div className="grid grid-cols-3 xl:grid-cols-4 gap-2">
                 {(Object.keys(statusConfig) as OrderStatus[]).map((status) => {
                   const config = statusConfig[status];
-                  const count = orders.filter((o) => o.status === status).length;
+                  const count = orders.filter(o => o.status === status).length;
                   const isActive = statusFilter === status;
-
+                  
+                  // Labels curtos
                   const shortLabels: Record<OrderStatus, string> = {
                     received: 'Recebido',
                     analyzing: 'Análise',
@@ -1184,7 +909,7 @@ export default function AdminOrders() {
                     ready_for_pickup: 'Pronto',
                     completed: 'Finalizado',
                   };
-
+                  
                   return (
                     <Button
                       key={status}
@@ -1195,33 +920,27 @@ export default function AdminOrders() {
                       style={
                         !isActive
                           ? {
-                              borderColor: config.borderColor.includes('blue')
-                                ? '#3b82f6'
-                                : config.borderColor.includes('purple')
-                                  ? '#a855f7'
-                                  : config.borderColor.includes('yellow')
-                                    ? '#eab308'
-                                    : config.borderColor.includes('cyan')
-                                      ? '#06b6d4'
-                                      : config.borderColor.includes('red')
-                                        ? '#ef4444'
-                                        : config.borderColor.includes('orange')
-                                          ? '#f97316'
-                                          : config.borderColor.includes('amber')
-                                            ? '#f59e0b'
-                                            : config.borderColor.includes('green')
-                                              ? '#22c55e'
-                                              : config.borderColor.includes('sky')
-                                                ? '#0ea5e9'
-                                                : undefined,
-                              borderWidth: '2px',
+                              borderColor: config.borderColor.includes('blue') ? '#3b82f6' :
+                                         config.borderColor.includes('purple') ? '#a855f7' :
+                                         config.borderColor.includes('yellow') ? '#eab308' :
+                                         config.borderColor.includes('cyan') ? '#06b6d4' :
+                                         config.borderColor.includes('red') ? '#ef4444' :
+                                         config.borderColor.includes('orange') ? '#f97316' :
+                                         config.borderColor.includes('amber') ? '#f59e0b' :
+                                         config.borderColor.includes('green') ? '#22c55e' :
+                                         config.borderColor.includes('sky') ? '#0ea5e9' : undefined,
+                              borderWidth: '2px'
                             }
                           : undefined
                       }
                     >
                       <span className="text-xl">{config.icon}</span>
-                      <span className="text-xs font-semibold leading-tight">{shortLabels[status]}</span>
-                      <span className="text-xs font-bold opacity-70">{count}</span>
+                      <span className="text-xs font-semibold leading-tight">
+                        {shortLabels[status]}
+                      </span>
+                      <span className="text-xs font-bold opacity-70">
+                        {count}
+                      </span>
                     </Button>
                   );
                 })}
@@ -1244,7 +963,12 @@ export default function AdminOrders() {
                 />
               </div>
               {statusFilter !== 'all' && (
-                <Button variant="outline" size="sm" onClick={() => setStatusFilter('all')} className="gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setStatusFilter('all')}
+                  className="gap-2"
+                >
                   <X className="h-4 w-4" />
                   Limpar Filtro
                 </Button>
@@ -1253,7 +977,9 @@ export default function AdminOrders() {
           </CardHeader>
           <CardContent>
             {filteredOrders.length === 0 ? (
-              <p className="text-muted-foreground text-center py-8">Nenhuma ordem encontrada</p>
+              <p className="text-muted-foreground text-center py-8">
+                Nenhuma ordem encontrada
+              </p>
             ) : (
               <div className="space-y-4">
                 {filteredOrders.map((order) => (
@@ -1268,10 +994,12 @@ export default function AdminOrders() {
                         <OrderStatusBadge status={order.status} />
                       </div>
                       <p className="text-sm text-muted-foreground">{order.equipment}</p>
-                      <p className="text-sm text-muted-foreground">Cliente: {order.client.name || order.client.email}</p>
+                      <p className="text-sm text-muted-foreground">
+                        Cliente: {order.client.name || order.client.email}
+                      </p>
                     </div>
                     <div className="text-right text-sm text-muted-foreground">
-                      {format(new Date(order.created_at), 'dd/MM/yyyy', { locale: ptBR })}
+                      {format(new Date(order.created_at), "dd/MM/yyyy", { locale: ptBR })}
                     </div>
                   </div>
                 ))}
@@ -1286,16 +1014,14 @@ export default function AdminOrders() {
         open={showConfirmation}
         onOpenChange={setShowConfirmation}
         data={{
-          client: pendingOrderData?.client_id ? clients.find((c) => c.id === pendingOrderData.client_id) : undefined,
+          client: pendingOrderData?.client_id ? clients.find(c => c.id === pendingOrderData.client_id) : undefined,
           isNewClient,
-          newClientData: isNewClient
-            ? {
-                first_name: pendingOrderData?.new_client_first_name || '',
-                last_name: pendingOrderData?.new_client_last_name || '',
-                email: pendingOrderData?.new_client_email || '',
-                phone: pendingOrderData?.new_client_phone || '',
-              }
-            : undefined,
+          newClientData: isNewClient ? {
+            first_name: pendingOrderData?.new_client_first_name || '',
+            last_name: pendingOrderData?.new_client_last_name || '',
+            email: pendingOrderData?.new_client_email || '',
+            phone: pendingOrderData?.new_client_phone || '',
+          } : undefined,
           equipment: pendingOrderData?.equipment || '',
           serial_number: pendingOrderData?.serial_number,
           problem_description: pendingOrderData?.problem_description || '',
