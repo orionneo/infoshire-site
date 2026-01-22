@@ -431,14 +431,29 @@ useEffect(() => {
           'Se você trocou de aba, o navegador pode pausar requisições. A criação pode concluir em segundo plano; volte para esta aba para conferir ou tente novamente.',
         variant: 'destructive',
       });
-
-  const orderNumber = generateOrderNumber();
-
-  try {
-    let clientId = data.client_id;
       // ✅ 3) tenta recarregar lista sem bloquear nada
       void loadData().catch((e) => console.warn('[OS]', opId, 'WATCHDOG loadData failed', e));
     }, WATCHDOG_MS);
+
+    const orderNumber = generateOrderNumber();
+    let didAbortFromVisibility = false;
+    let didAbortNotify = false;
+    const abortController = new AbortController();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        didAbortFromVisibility = true;
+        abortController.abort();
+      }
+    };
+
+    const handlePageHide = () => {
+      didAbortFromVisibility = true;
+      abortController.abort();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
 
     try {
       let clientId = data.client_id;
@@ -453,26 +468,6 @@ useEffect(() => {
         clientId = newClient.id;
       }
 
-    const order = await createServiceOrder(
-      {
-        client_id: clientId,
-        entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
-        equipment: data.equipment,
-        serial_number: data.serial_number,
-        problem_description: data.problem_description,
-        has_multiple_items: hasMultipleItems,
-        order_number: orderNumber,
-        items: hasMultipleItems
-          ? additionalItems.map((it) => ({
-              equipment: it.equipment,
-              serial_number: it.serial_number || undefined,
-              description: it.description || undefined,
-            }))
-          : undefined,
-      },
-      // ✅ ADMIN: timeout curto + vis-aware (NÃO 60s)
-      { allowOfflineQueue: false, timeoutMs: 15000, abortController }
-    );
       const order = await createServiceOrder(
         {
           client_id: clientId,
@@ -481,6 +476,7 @@ useEffect(() => {
           serial_number: data.serial_number,
           problem_description: data.problem_description,
           has_multiple_items: hasMultipleItems,
+          order_number: orderNumber,
           items: hasMultipleItems
             ? additionalItems.map((it) => ({
                 equipment: it.equipment,
@@ -490,7 +486,7 @@ useEffect(() => {
             : undefined,
         },
         // ✅ ADMIN: timeout curto + vis-aware (NÃO 60s)
-        { allowOfflineQueue: false, timeoutMs: 15000 }
+        { allowOfflineQueue: false, timeoutMs: 15000, abortController }
       );
 
       // ✅ Upload de imagens: não “quebra” a criação se falhar upload
@@ -528,67 +524,66 @@ useEffect(() => {
     } catch (err: any) {
       console.error('❌ Falha ao criar OS:', err);
 
-    let recovered = false;
-    if (!didAbortFromVisibility && err?.name !== 'AbortError' && orderNumber) {
-      try {
-        const existingOrder = await getServiceOrderByOrderNumber(orderNumber);
-        if (existingOrder) {
-          recovered = true;
-          toast({
-            title: 'Ordem criada',
-            description: `OS ${existingOrder.order_number || existingOrder.id}`,
-          });
+      let recovered = false;
+      if (!didAbortFromVisibility && err?.name !== 'AbortError' && orderNumber) {
+        try {
+          const existingOrder = await getServiceOrderByOrderNumber(orderNumber);
+          if (existingOrder) {
+            recovered = true;
+            toast({
+              title: 'Ordem criada',
+              description: `OS ${existingOrder.order_number || existingOrder.id}`,
+            });
 
-          sessionStorage.removeItem(FORM_DRAFT_KEY);
-          sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
+            sessionStorage.removeItem(FORM_DRAFT_KEY);
+            sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
 
-          setShowConfirmation(false);
-          setDialogOpen(false);
-          form.reset();
-          setIsNewClient(false);
-          setHasMultipleItems(false);
-          setAdditionalItems([]);
-          setSelectedImages([]);
-          setPendingOrderData(null);
+            setShowConfirmation(false);
+            setDialogOpen(false);
+            form.reset();
+            setIsNewClient(false);
+            setHasMultipleItems(false);
+            setAdditionalItems([]);
+            setSelectedImages([]);
+            setPendingOrderData(null);
 
-          await loadData();
+            await loadData();
+          }
+        } catch (lookupError) {
+          console.warn('Falha ao buscar OS por order_number:', lookupError);
         }
-      } catch (lookupError) {
-        console.warn('Falha ao buscar OS por order_number:', lookupError);
       }
-    }
 
-    if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError') {
-      toast({
-        title: 'Erro ao criar OS',
-        description:
-          err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
-            ? 'Sem conexão no momento. Verifique internet e tente novamente.'
-            : err?.message || 'Falha inesperada ao criar a OS.',
-        variant: 'destructive',
-      });
+      if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError') {
+        toast({
+          title: 'Erro ao criar OS',
+          description:
+            err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
+              ? 'Sem conexão no momento. Verifique internet e tente novamente.'
+              : err?.message || 'Falha inesperada ao criar a OS.',
+          variant: 'destructive',
+        });
+      }
 
-    if (!recovered) {
-      // mantém rascunho do form (não apaga)
-      sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
-    }
-  } finally {
-    clearTimeout(watchdog);
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-    window.removeEventListener('pagehide', handlePageHide);
-    setCreating(false);
-    if (didAbortFromVisibility && !didAbortNotify) {
-      toast({
-        title: 'Criação interrompida em background',
-        description:
-          'A aba foi para segundo plano e a requisição foi cancelada. Verifique a lista de OS; se necessário, tente novamente.',
-        variant: 'destructive',
-      });
-      // mantém rascunho do form (não apaga)
-      sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+      if (!recovered) {
+        // mantém rascunho do form (não apaga)
+        sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+      }
     } finally {
       clearTimeout(watchdog);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('pagehide', handlePageHide);
       setCreating(false);
+      if (didAbortFromVisibility && !didAbortNotify) {
+        toast({
+          title: 'Criação interrompida em background',
+          description:
+            'A aba foi para segundo plano e a requisição foi cancelada. Verifique a lista de OS; se necessário, tente novamente.',
+          variant: 'destructive',
+        });
+        // mantém rascunho do form (não apaga)
+        sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+      }
     }
   };
 
