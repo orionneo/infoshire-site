@@ -246,6 +246,35 @@ function generateOrderNumber() {
   return `OS-${y}${m}${day}-${hh}${mm}-${rand}`;
 }
 
+function withTimeout<T>(promiseLike: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const start = Date.now();
+    let done = false;
+
+    const t = setTimeout(() => {
+      if (done) return;
+      done = true;
+      reject(new Error(`${label}. timeout after ${ms}ms (elapsed=${Date.now() - start}ms)`));
+    }, ms);
+
+    Promise.resolve(promiseLike).then(
+      (v) => {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        if (done) return;
+        done = true;
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+}
+
+
 export async function createServiceOrder(
   order: {
     client_id: string;
@@ -266,14 +295,12 @@ export async function createServiceOrder(
 ): Promise<ServiceOrder> {
   const timeoutMs = options.timeoutMs ?? 15000;
 
-  // ✅ Exigir sessão: evita POST sem JWT (vira 401/RLS e pode ficar "travando")
+  // ✅ Exigir sessão: evita POST sem JWT
   const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
   if (sessionErr) throw sessionErr;
-  if (!sessionData.session?.user) {
-    throw new Error('Sessão expirada. Faça login novamente.');
-  }
+  if (!sessionData.session?.user) throw new Error('Sessão expirada. Faça login novamente.');
 
-  // ADMIN deve criar online. Se estiver offline, falha rápido e claro.
+  // ✅ Admin deve criar online
   if (!navigator.onLine) {
     if (options.allowOfflineQueue) {
       throw new Error('Sem internet. (offline queue desativada por padrão no admin)');
@@ -305,62 +332,30 @@ export async function createServiceOrder(
     has_multiple_items: order.has_multiple_items ?? false,
   };
 
-  const isUniqueViolation = (e: any): boolean => {
-    const code = String(e?.code || '');
-    const msg = String(e?.message || '').toLowerCase();
-    const details = String(e?.details || '').toLowerCase();
-    return code === '23505' || msg.includes('duplicate') || details.includes('duplicate');
-  };
-
-  const tryInsert = async () => {
-    const res = await withTimeoutVisAware(
+  // ✅ 1) Cria a OS com timeout (não pode travar)
+  let inserted: any;
+  try {
+    inserted = await withTimeout(
       supabase.from('service_orders').insert(payload).select().single(),
       timeoutMs,
-      'create_service_order'
+      'create_service_order timeout'
     );
-    return res;
-  };
-
-  const fetchByOrderNumber = async () => {
+  } catch (e: any) {
+    // Se timeout: pode ter criado no backend e o browser "dormiu"
     const check = await supabase
       .from('service_orders')
       .select('*')
       .eq('order_number', order_number)
       .maybeSingle();
 
-    if (check.error) {
-      // eslint-disable-next-line no-console
-      console.warn('Fallback fetchByOrderNumber failed:', check.error);
-      return null;
-    }
-    return (check.data ?? null) as ServiceOrder | null;
-  };
-
-  let inserted: any;
-
-  try {
-    inserted = await tryInsert();
-  } catch (e: any) {
-    // 1) Se timeout (aba em background) OU conflito (23505), pode ter criado no backend
-    if (isTimeoutError(e) || isUniqueViolation(e)) {
-      const existing = await fetchByOrderNumber();
-      if (existing) return existing;
-
-      // 2) Se for timeout e ainda não existe, tenta inserir mais 1 vez
-      if (isTimeoutError(e)) {
-        inserted = await tryInsert();
-      } else {
-        throw e;
-      }
-    } else {
-      throw e;
-    }
+    if (check?.data) return check.data as ServiceOrder;
+    throw e;
   }
 
-  if (inserted?.error) throw inserted.error;
+  if (inserted.error) throw inserted.error;
   const created = inserted.data as ServiceOrder;
 
-  // Itens (opcional)
+  // ✅ 2) Itens (opcional) com timeout
   if (order.items?.length) {
     const itemsPayload = order.items.map((it) => ({
       service_order_id: created.id,
@@ -369,40 +364,43 @@ export async function createServiceOrder(
       description: it.description ?? null,
     }));
 
-    const itemsRes = await withTimeoutVisAware(
+    const itemsRes = await withTimeout(
       supabase.from('service_order_items').insert(itemsPayload),
       timeoutMs,
-      'create_service_order_items'
+      'create_service_order_items timeout'
     );
     if (itemsRes.error) throw itemsRes.error;
   }
 
-  // Histórico inicial (best effort)
-  // ⚠️ Em PWA/mobile, trocar de aba pode pausar requests.
-  // Então este passo NÃO pode travar a criação da OS.
+  // ✅ 3) Histórico inicial: **NUNCA** pode travar a criação da OS
+  // - Se aba estiver hidden, nem tenta (PWA pausa requests)
+  // - Se der timeout/erro/RLS, só loga e segue
   try {
-    const historyRes = await withTimeoutVisAware(
-      supabase.from('order_status_history').insert({
-        order_id: created.id,
-        status: 'received',
-        notes: 'Ordem de serviço criada',
-        created_by: sessionData.session.user.id,
-      }),
-      5000,
-      'create_order_status_history'
-    );
+    if (document.visibilityState === 'visible') {
+      const historyRes = await withTimeout(
+        supabase.from('order_status_history').insert({
+          order_id: created.id,
+          status: 'received',
+          notes: 'Ordem de serviço criada',
+          created_by: sessionData.session.user.id,
+        }),
+        5000,
+        'create_order_status_history timeout'
+      );
 
-    if ((historyRes as any)?.error) {
-      // eslint-disable-next-line no-console
-      console.warn('Falha ao criar histórico inicial:', (historyRes as any).error);
+      if ((historyRes as any)?.error) {
+        console.warn('Falha ao criar histórico inicial (ignorado):', (historyRes as any).error);
+      }
+    } else {
+      console.warn('Histórico inicial pulado (aba hidden).');
     }
   } catch (e) {
-    // eslint-disable-next-line no-console
     console.warn('Histórico inicial não foi gravado (ignorado):', e);
   }
 
   return created;
 }
+
 
 export async function updateServiceOrder(
   id: string,
