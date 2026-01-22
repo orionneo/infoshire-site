@@ -297,7 +297,20 @@ export default function AdminOrders() {
   };
 
   const handleConfirmOrder = async () => {
-    if (!pendingOrderData) return;
+    if (creating) {
+      toast({
+        title: 'Criação em andamento',
+        description: 'Já existe uma criação de OS em andamento. Aguarde a conclusão.',
+      });
+      return;
+    }
+    if (!pendingOrderData) {
+      console.warn('[OS] handleConfirmOrder bloqueado: pendingOrderData vazio', {
+        reason: 'pendingOrderData empty',
+        draft: form.getValues(),
+      });
+      return;
+    }
     
     const data = pendingOrderData;
     setCreating(true);
