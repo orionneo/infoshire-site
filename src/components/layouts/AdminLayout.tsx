@@ -1,4 +1,4 @@
-import { BarChart3, Brain, DollarSign, Home, LayoutDashboard, LogOut, Mail, Megaphone, Menu, MessageSquare, Package, Settings, SettingsIcon, Shield, UserCog, Users, Wrench } from 'lucide-react';
+import { Brain, DollarSign, Home, LayoutDashboard, LogOut, Mail, Megaphone, Menu, MessageSquare, Package, Settings, SettingsIcon, Shield, UserCog, Users, Wrench } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ApprovalNotifications } from '@/components/ApprovalNotifications';
@@ -24,7 +24,6 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
     { to: '/admin/orders', label: 'Ordens de Serviço', icon: Package },
     { to: '/admin/clients', label: 'Clientes', icon: Users },
     { to: '/admin/financial', label: 'Financeiro', icon: DollarSign },
-    { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
     { to: '/admin/ai-knowledge', label: 'Base de Conhecimento', icon: Brain },
     { to: '/admin/warranty-search', label: 'Buscar Garantia', icon: Shield },
     { to: '/admin/warranty-list', label: 'Garantias Ativas', icon: Shield },
