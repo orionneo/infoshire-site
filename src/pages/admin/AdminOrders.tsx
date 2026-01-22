@@ -469,7 +469,35 @@ export default function AdminOrders() {
   };
 
   const handleConfirmOrder = async () => {
-    if (!pendingOrderData) return;
+    if (!pendingOrderData) {
+      toast({
+        title: 'Dados da OS não encontrados',
+        description: 'Dados da OS não encontrados, reabra a confirmação',
+        variant: 'destructive',
+      });
+
+      const draftValue =
+        secureTabStorage.getItem(FORM_DRAFT_KEY) || secureTabStorage.getItem('ORDER_DRAFT_FALLBACK');
+
+      if (draftValue) {
+        try {
+          const draft = JSON.parse(draftValue);
+          setPendingOrderData(draft);
+          setShowConfirmation(true);
+          return;
+        } catch (error) {
+          console.warn('Erro ao restaurar rascunho da OS:', error);
+        }
+      }
+
+      setShowConfirmation(false);
+      toast({
+        title: 'Revise o formulário',
+        description: 'Não foi possível recuperar o rascunho. Revise o formulário e tente novamente.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     const data = pendingOrderData;
 
