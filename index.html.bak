@@ -1,6 +1,27 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
   <head>
+  <!-- HASHROUTER_COMPAT_REDIRECT: permite links diretos (ex /approve/...) em GitHub Pages -->
+  <script>
+    (function () {
+      try {
+        var p = window.location.pathname || "";
+        // Ajuste aqui se você usar subpasta; em domínio raiz é só isso:
+        if (p.startsWith("/approve/")) {
+          var token = p.slice("/approve/".length);
+          var target = window.location.origin + "/#/approve/" + token + window.location.search;
+          window.location.replace(target);
+          return;
+        }
+        // (Opcional) se algum link antigo /login vier sem hash
+        if (p === "/login") {
+          window.location.replace(window.location.origin + "/#/login" + window.location.search);
+          return;
+        }
+      } catch (e) {}
+    })();
+  </script>
+
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#000000" />
@@ -10,8 +31,8 @@
     <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests" />
     
     <!-- PWA Meta Tags -->
-    <link rel="icon" type="image/png" href="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8slbycf711c0.png" />
-    <link rel="apple-touch-icon" href="https://miaoda-conversation-file.s3cdn.medo.dev/user-7zo72h3r905c/conv-8pj0bpgfx6v4/20260108/file-8slbycf711c0.png" />
+    <link rel="icon" type="image/png" href="/assets/medo/medo-4a803e47b5.png" />
+    <link rel="apple-touch-icon" href="/assets/medo/medo-4a803e47b5.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="InfoShire" />
