@@ -262,28 +262,47 @@ export async function createClientProfile(clientData: {
   name: string;
   phone: string;
   password: string;
+  timeoutMs?: number;
+  abortSignal?: AbortSignal;
 }): Promise<Profile> {
+  const timeoutMs = clientData.timeoutMs ?? 15000;
+  const abortSignal = clientData.abortSignal;
+
+  if (abortSignal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
+
   // Create auth user
-  const { data: authData, error: authError } = await supabase.auth.signUp({
-    email: clientData.email,
-    password: clientData.password,
-    options: {
-      data: {
-        name: clientData.name,
-        phone: clientData.phone,
+  const { data: authData, error: authError } = await withTimeoutVisAware(
+    supabase.auth.signUp({
+      email: clientData.email,
+      password: clientData.password,
+      options: {
+        data: {
+          name: clientData.name,
+          phone: clientData.phone,
+        },
       },
-    },
-  });
+    }),
+    timeoutMs,
+    'createClientProfile.signUp',
+    abortSignal
+  );
 
   if (authError) throw authError;
   if (!authData.user) throw new Error('Falha ao criar usuário');
 
   // Get the created profile
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', authData.user.id)
-    .maybeSingle();
+  const { data: profile, error: profileError } = await withTimeoutVisAware(
+    supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', authData.user.id)
+      .maybeSingle(),
+    timeoutMs,
+    'createClientProfile.profile',
+    abortSignal
+  );
 
   if (profileError) throw profileError;
   if (!profile) throw new Error('Perfil não encontrado');
