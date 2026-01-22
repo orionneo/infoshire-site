@@ -33,10 +33,20 @@ export function StatePersistence({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (window.location.hash.startsWith('#/admin')) {
+      return;
+    }
+
     // Salvar rota atual quando mudar
     const saveCurrentState = () => {
-      secureTabStorage.setItem('app_last_route', location.pathname);
-      secureTabStorage.setItem('app_scroll_y', window.scrollY.toString());
+      try {
+        if (!secureTabStorage.setItem('app_last_route', location.pathname)) {
+          return;
+        }
+        secureTabStorage.setItem('app_scroll_y', window.scrollY.toString());
+      } catch (error) {
+        console.error('Erro ao salvar estado de navegação:', error);
+      }
     };
 
     // Salvar estado quando a página ficar invisível (minimizar app)

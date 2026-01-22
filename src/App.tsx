@@ -18,81 +18,70 @@ import { installAutoSyncListeners } from '@/utils/autoSync';
 function AppShell() {
   const location = useLocation();
   const autoSyncCleanupRef = useRef<null | (() => void)>(null);
-  const isAdminRoute = () =>
+  const isAdminRoute =
     location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
 
   // Mostra checagem de conexão APENAS em rotas autenticadas
-  const showConnectionStatus = location.pathname.startsWith('/client') && !isAdminRoute();
+  const showConnectionStatus = location.pathname.startsWith('/client') && !isAdminRoute;
 
   useEffect(() => {
-  // 🚫 Admin NÃO usa fila offline e esse drain em "visibilitychange" pode gerar lock/AbortError no Supabase Auth
-  if (isAdminRoute()) return;
+    // 🚫 Admin NÃO usa fila offline e esse drain em "visibilitychange" pode gerar lock/AbortError no Supabase Auth
+    if (isAdminRoute) return;
 
-  const drain = () => {
-    // não bloqueia UI, só tenta sincronizar
-    void processOfflineQueue();
-  };
+    const drain = () => {
+      // não bloqueia UI, só tenta sincronizar
+      void processOfflineQueue();
+    };
 
-  const onOnline = () => {
-    console.log('🌐 Conexão restaurada, processando fila offline...');
-    drain();
-  };
-
-  const onFocus = () => {
-    // desktop/alguns browsers
-    drain();
-  };
-
-  const onVisibility = () => {
-    // PWA/mobile: mais confiável que focus
-    if (document.visibilityState === 'visible') {
+    const onOnline = () => {
+      console.log('🌐 Conexão restaurada, processando fila offline...');
       drain();
-    }
-  };
+    };
 
-  window.addEventListener('online', onOnline);
-  window.addEventListener('focus', onFocus);
-  document.addEventListener('visibilitychange', onVisibility);
+    const onFocus = () => {
+      // desktop/alguns browsers
+      drain();
+    };
 
-  // Também processa ao abrir o site (leve atraso pra não competir com mount/auth)
-  const t = window.setTimeout(() => drain(), 1500);
-
-  return () => {
-    window.removeEventListener('online', onOnline);
-    window.removeEventListener('focus', onFocus);
-    document.removeEventListener('visibilitychange', onVisibility);
-    window.clearTimeout(t);
-  };
-}, [location.hash, location.pathname]);
-
-  useEffect(() => {
-    const shouldEnable = () =>
-      !window.location.hash.startsWith('#/admin') && !window.location.pathname.startsWith('/admin');
-
-    const updateListeners = () => {
-      const enabled = shouldEnable();
-      if (enabled && !autoSyncCleanupRef.current) {
-        autoSyncCleanupRef.current = installAutoSyncListeners();
-      }
-      if (!enabled && autoSyncCleanupRef.current) {
-        autoSyncCleanupRef.current();
-        autoSyncCleanupRef.current = null;
+    const onVisibility = () => {
+      // PWA/mobile: mais confiável que focus
+      if (document.visibilityState === 'visible') {
+        drain();
       }
     };
 
-    updateListeners();
-    window.addEventListener('hashchange', updateListeners);
-    window.addEventListener('popstate', updateListeners);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    // Também processa ao abrir o site (leve atraso pra não competir com mount/auth)
+    const t = window.setTimeout(() => drain(), 1500);
 
     return () => {
-      window.removeEventListener('hashchange', updateListeners);
-      window.removeEventListener('popstate', updateListeners);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.clearTimeout(t);
+    };
+  }, [isAdminRoute]);
+
+  useEffect(() => {
+    if (!isAdminRoute && !autoSyncCleanupRef.current) {
+      autoSyncCleanupRef.current = installAutoSyncListeners();
+    }
+
+    if (isAdminRoute && autoSyncCleanupRef.current) {
+      autoSyncCleanupRef.current();
+      autoSyncCleanupRef.current = null;
+    }
+
+    return () => {
       if (autoSyncCleanupRef.current) {
         autoSyncCleanupRef.current();
         autoSyncCleanupRef.current = null;
       }
     };
-  }, []);
+  }, [isAdminRoute]);
 
 
   return (
@@ -101,7 +90,7 @@ function AppShell() {
         <RouteGuard>
           <ScrollToTop />
           <IntersectObserver />
-          {!isAdminRoute() ? <AnalyticsTracker /> : null}
+          {!isAdminRoute ? <AnalyticsTracker /> : null}
           <GlobalGamerBackground />
 
           <div className="flex flex-col min-h-screen relative z-10">

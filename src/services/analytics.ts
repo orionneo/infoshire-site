@@ -12,6 +12,7 @@ const SESSION_STARTED_KEY = 'analytics_session_started';
 
 const DISABLE_ON_RLS_MINUTES = 60 * 24; // 24h
 const DISABLE_ON_AUTH_MINUTES = 60 * 24; // 24h
+const DISABLE_ON_CONFLICT_MINUTES = 60 * 24; // 24h
 const DISABLE_ON_NETWORK_MINUTES = 10; // 10 min
 
 const HEARTBEAT_MS = 15000;
@@ -154,6 +155,10 @@ function isAuthError(err: any): boolean {
   return status === 401 || msg.includes('unauthorized') || msg.includes('jwt') || msg.includes('invalid token');
 }
 
+function isForeignKeyOrConflictError(err: any): boolean {
+  return err?.code === '23503' || err?.status === 409;
+}
+
 function isNetworkError(err: any): boolean {
   const msg = String(err?.message || '').toLowerCase();
   return !navigator.onLine || msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('timeout');
@@ -175,6 +180,7 @@ function handleAnalyticsError(context: string, err: any) {
     return;
   }
 
+  if (isForeignKeyOrConflictError(err)) disableAnalyticsForMinutes(DISABLE_ON_CONFLICT_MINUTES);
   if (isRlsOrPermissionError(err)) disableAnalyticsForMinutes(DISABLE_ON_RLS_MINUTES);
   if (isAuthError(err)) disableAnalyticsForMinutes(DISABLE_ON_AUTH_MINUTES);
   if (isNetworkError(err)) disableAnalyticsForMinutes(DISABLE_ON_NETWORK_MINUTES);
