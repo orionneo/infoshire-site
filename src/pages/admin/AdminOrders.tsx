@@ -593,6 +593,7 @@ export default function AdminOrders() {
     setPendingOrderData(data);
     pendingOrderRef.current = data;
 
+    if (document.visibilityState !== 'visible') return;
     const hasFreshSession = await ensureFreshSession();
     if (!hasFreshSession) {
       toast({
