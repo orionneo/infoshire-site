@@ -38,6 +38,7 @@ import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types
 
 // Chave para salvar o rascunho do formulário
 const FORM_DRAFT_KEY = 'admin_order_form_draft';
+const PENDING_CONFIRMATION_KEY = 'admin_order_pending_confirmation';
 type CreatingSession = {
   orderNumber: string;
   startedAt: number;
@@ -143,7 +144,6 @@ export default function AdminOrders() {
     setHasMultipleItems(false);
     setAdditionalItems([]);
     setSelectedImages([]);
-    setPendingOrderData(null);
   }, [dialogOpen]);
 
   // ✅ Garantir default do entry_date = hoje, se não vier do draft
@@ -229,6 +229,7 @@ export default function AdminOrders() {
     setAdditionalItems([]);
     setSelectedImages([]);
     setPendingOrderData(null);
+    secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
   }, [form]);
 
   const finalizeCreationSuccess = useCallback(
@@ -268,6 +269,8 @@ export default function AdminOrders() {
       if (pendingOrderData) {
         safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(pendingOrderData));
       }
+      setPendingOrderData(null);
+      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
     },
     [pendingOrderData, toast]
   );
@@ -301,6 +304,35 @@ export default function AdminOrders() {
     },
     [creating, finalizeCreationError, finalizeCreationSuccess, toast]
   );
+
+  const restorePendingConfirmation = useCallback(() => {
+    const savedPending = secureTabStorage.getItem(PENDING_CONFIRMATION_KEY);
+    if (!savedPending) return;
+
+    try {
+      const pending = JSON.parse(savedPending);
+      setPendingOrderData(pending);
+    } catch (error) {
+      console.warn('Erro ao restaurar confirmação pendente:', error);
+      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+    }
+  }, []);
+
+  const handleConfirmationOpenChange = useCallback(
+    (open: boolean) => {
+      if (open) {
+        restorePendingConfirmation();
+      }
+      setShowConfirmation(open);
+    },
+    [restorePendingConfirmation]
+  );
+
+  const handleConfirmationCancel = useCallback(() => {
+    setPendingOrderData(null);
+    secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+    setShowConfirmation(false);
+  }, []);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -465,6 +497,7 @@ export default function AdminOrders() {
 
     // Todas as validações passaram - mostrar confirmação
     setPendingOrderData(data);
+    secureTabStorage.setItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
     setShowConfirmation(true);
   };
 
@@ -480,6 +513,32 @@ export default function AdminOrders() {
       console.warn('[OS] handleConfirmOrder bloqueado: pendingOrderData vazio', {
         reason: 'pendingOrderData empty',
         draft: form.getValues(),
+    if (!pendingOrderData) {
+      toast({
+        title: 'Dados da OS não encontrados',
+        description: 'Dados da OS não encontrados, reabra a confirmação',
+        variant: 'destructive',
+      });
+
+      const draftValue =
+        secureTabStorage.getItem(FORM_DRAFT_KEY) || secureTabStorage.getItem('ORDER_DRAFT_FALLBACK');
+
+      if (draftValue) {
+        try {
+          const draft = JSON.parse(draftValue);
+          setPendingOrderData(draft);
+          setShowConfirmation(true);
+          return;
+        } catch (error) {
+          console.warn('Erro ao restaurar rascunho da OS:', error);
+        }
+      }
+
+      setShowConfirmation(false);
+      toast({
+        title: 'Revise o formulário',
+        description: 'Não foi possível recuperar o rascunho. Revise o formulário e tente novamente.',
+        variant: 'destructive',
       });
       return;
     }
@@ -611,6 +670,7 @@ export default function AdminOrders() {
       // ✅ limpa drafts e fecha diálogos
       secureTabStorage.removeItem(FORM_DRAFT_KEY);
       secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
+      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
 
       setShowConfirmation(false);
       setDialogOpen(false);
@@ -643,6 +703,7 @@ export default function AdminOrders() {
 
             secureTabStorage.removeItem(FORM_DRAFT_KEY);
             secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
+            secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
 
             setShowConfirmation(false);
             setDialogOpen(false);
@@ -1089,6 +1150,7 @@ export default function AdminOrders() {
                       onClick={() => {
                         secureTabStorage.removeItem(FORM_DRAFT_KEY);
                         secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
+                        secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
 
                         setShowConfirmation(false);
                         setDialogOpen(false);
@@ -1318,7 +1380,7 @@ export default function AdminOrders() {
       {/* Order Confirmation Dialog */}
       <OrderConfirmationDialog
         open={showConfirmation}
-        onOpenChange={setShowConfirmation}
+        onOpenChange={handleConfirmationOpenChange}
         data={{
           client: pendingOrderData?.client_id ? clients.find((c) => c.id === pendingOrderData.client_id) : undefined,
           isNewClient,
@@ -1339,6 +1401,7 @@ export default function AdminOrders() {
           selectedImages,
         }}
         onConfirm={handleConfirmOrder}
+        onCancel={handleConfirmationCancel}
         loading={creating}
       />
     </AdminLayout>
