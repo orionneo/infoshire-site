@@ -21,18 +21,6 @@ import { addOfflineTask, attachBlob, isOnlineNow } from '@/utils/offlineQueue';
 import { v4 as uuid } from 'uuid';
 
 
-
-function fallbackOrderNumber(): string {
-  // formato: OS-YYYYMMDD-HHMM-XXXX
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const rnd = Math.random().toString(16).slice(2, 6).toUpperCase();
-  return `OS-${y}${m}${day}-${hh}${mm}-${rnd}`;
-}
 /**
  * Helper para tratamento de erros de API
  */
@@ -191,64 +179,30 @@ export async function getServiceOrder(id: string): Promise<ServiceOrderWithClien
   return data;
 }
 
-type CreateServiceOrderOptions = {
-  /** ADMIN: false => nunca enfileira offline (sem "sincronizando") */
+export interface CreateServiceOrderOptions {
   /**
-   * Quando false, desabilita completamente o fallback offline (modo ADMIN).
-   * Se offline ou der erro, lança exceção em vez de enfileirar.
+   * Mantém compatibilidade com o resto do app, mas por padrão o ADMIN NÃO cria OS offline.
+   * Se true, e a criação falhar por rede, você poderá enfileirar manualmente em outra camada.
    */
-  createHistory?: boolean;
-  firstHistoryNote?: string;
   allowOfflineQueue?: boolean;
-
-  /** Timeout global do fluxo de criação (ms). Default 60000 */
+  /** timeout em ms para operações críticas */
   timeoutMs?: number;
+}
 
-  /** Texto inicial do histórico (quando cria a OS) */
-  notes?: string | null;
-};
-
-// ============================
-// Step 3.1 helpers (module-scope)
-// ============================
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-const isTimeoutErr = (e: any) =>
-  typeof e?.message === 'string' && e.message.toLowerCase().includes('timeout');
-
-const isNetworkErr = (e: any) =>
-  e?.name === 'TypeError' ||
-  (typeof e?.message === 'string' && e.message.includes('Failed to fetch'));
-
-// ============================
-// Step 3.2: fast RPC with retry
-// ============================
-async function generateOrderNumberFast(): Promise<any> {
-  let lastErr: any = null;
-
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      const { data, error } = await withTimeout(
-        supabase.rpc('generate_order_number'),
-        20000,
-        `generate_order_number(attempt ${attempt})`
-      );
-      if (error) throw error;
-      return data;
-    } catch (e: any) {
-      lastErr = e;
-
-      // retry só em timeout/rede
-      if (attempt < 2 && (isTimeoutErr(e) || isNetworkErr(e))) {
-        await sleep(600);
-        continue;
-      }
-
-      throw e;
-    }
-  }
-
-  throw lastErr;
+/**
+ * Gera um número de OS sem depender de RPC (evita travas/timeouts).
+ * Formato: OS-YYYYMMDD-HHMM-XXXX
+ */
+function generateOrderNumber() {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const y = d.getFullYear();
+  const m = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mm = pad(d.getMinutes());
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `OS-${y}${m}${day}-${hh}${mm}-${rand}`;
 }
 
 export async function createServiceOrder(
@@ -269,71 +223,109 @@ export async function createServiceOrder(
   },
   options: CreateServiceOrderOptions = {}
 ): Promise<ServiceOrder> {
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  if (!userData.user) throw new Error('Sessão expirada. Faça login novamente.');
+  const timeoutMs = options.timeoutMs ?? 15000;
 
-  // Try your RPC, but don't block forever. If it fails, use a safe fallback.
-  let orderNumber: string | null = null;
-  try {
-    const rpc = supabase.rpc('generate_order_number', { p_client_id: order.client_id });
-    const { data } = await withTimeout(rpc, 8000, 'generate_order_number');
-    orderNumber = (data as any) ?? null;
-  } catch (e) {
-    console.warn('⚠️ generate_order_number failed, using fallback:', e);
-    orderNumber = fallbackOrderNumber();
+  // ✅ Exigir sessão: evita POST sem JWT (vira 401/RLS e fica "travando")
+  const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+  if (sessionErr) {
+    throw sessionErr;
+  }
+  if (!sessionData.session?.user) {
+    throw new Error('Sessão expirada. Faça login novamente.');
   }
 
-  // Insert order
-  const payload: Record<string, any> = {
-    ...order,
-    order_number: orderNumber,
-    status: 'received',
-    // common RLS requirement
-    created_by: userData.user.id,
+  // ADMIN deve criar online. Se estiver offline, falha rápido e claro.
+  if (!navigator.onLine) {
+    if (options.allowOfflineQueue) {
+      throw new Error('Sem internet. (offline queue desativada por padrão no admin)');
+    }
+    throw new Error('Sem internet. Conecte e tente novamente.');
+  }
+
+  const order_number = generateOrderNumber();
+
+  const payload: Partial<ServiceOrder> & {
+    order_number: string;
+    client_id: string;
+    equipment: string;
+    problem_description: string;
+    serial_number?: string | null;
+    entry_date?: string | null;
+    equipment_photo_url?: string | null;
+    estimated_completion?: string | null;
+    has_multiple_items?: boolean;
+  } = {
+    order_number,
+    client_id: order.client_id,
+    equipment: order.equipment,
+    problem_description: order.problem_description,
+    serial_number: order.serial_number ?? null,
+    entry_date: order.entry_date ?? null,
+    equipment_photo_url: order.equipment_photo_url ?? null,
+    estimated_completion: order.estimated_completion ?? null,
+    has_multiple_items: order.has_multiple_items ?? false,
   };
 
-  const { data: created, error } = await supabase
-    .from('service_orders')
-    .insert(payload)
-    .select()
-    .single();
+  const inserted = await withTimeout(
+    supabase
+      .from('service_orders')
+      .insert(payload)
+      .select()
+      .single(),
+    timeoutMs,
+    'create_service_order timeout'
+  );
 
-  if (error) throw error;
+  if (inserted.error) throw inserted.error;
+  const created = inserted.data as ServiceOrder;
 
-  // Optional: items (if you have this table)
-  if (order.has_multiple_items && Array.isArray(order.items) && order.items.length) {
-    const rows = order.items.map((it) => ({
-      order_id: (created as any).id,
+  // Itens (opcional)
+  if (order.items?.length) {
+    const itemsPayload = order.items.map((it) => ({
+      service_order_id: created.id,
       equipment: it.equipment,
       serial_number: it.serial_number ?? null,
       description: it.description ?? null,
     }));
-    const { error: itemsErr } = await supabase.from('service_order_items').insert(rows);
-    if (itemsErr) {
-      // Don't fail the whole creation for items; log and move on.
-      console.warn('⚠️ service_order_items insert failed:', itemsErr);
-    }
+
+    const itemsRes = await withTimeout(
+      supabase.from('service_order_items').insert(itemsPayload),
+      timeoutMs,
+      'create_service_order_items timeout'
+    );
+    if (itemsRes.error) throw itemsRes.error;
   }
 
-  // First history entry (helps timelines)
-  const createHistory = options.createHistory ?? true;
-  if (createHistory) {
-    const notes = options.firstHistoryNote ?? 'Ordem de serviço criada';
-    await updateServiceOrderStatus((created as any).id, 'received', notes, userData.user.id).catch((e) => {
-      console.warn('⚠️ updateServiceOrderStatus (initial) failed:', e);
-    });
+  // Histórico inicial (opcional)
+  // Observação: se sua RLS bloquear, ajuste as policies (ver SQL do fix).
+  const historyRes = await supabase.from('order_status_history').insert({
+    order_id: created.id,
+    status: 'received',
+    notes: 'Ordem de serviço criada',
+    created_by: sessionData.session.user.id,
+  });
+  // Se não der permissão para histórico, não travamos a criação da OS:
+  if (historyRes.error) {
+    // eslint-disable-next-line no-console
+    console.warn('Falha ao criar histórico inicial:', historyRes.error);
   }
 
-  return created as ServiceOrder;
+  return created;
 }
 
+export async function updateServiceOrder(
+  id: string,
+  updates: Partial<ServiceOrder>
+): Promise<ServiceOrder> {
+  const { data, error } = await supabase
+    .from('service_orders')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
 
-
-export async function updateServiceOrder(id: string, updates: Partial<ServiceOrder>): Promise<ServiceOrder> {
-  const { data, error } = await supabase.from('service_orders').update(updates).eq('id', id).select().single();
   if (error) throw error;
-  return data as ServiceOrder;
+  return data;
 }
 
 export async function updateServiceOrderStatus(
@@ -342,30 +334,30 @@ export async function updateServiceOrderStatus(
   notes: string | null,
   createdBy: string
 ): Promise<ServiceOrder> {
-  // Update order status
-  const { data: order, error: updErr } = await supabase
+  const updates: Partial<ServiceOrder> = { status };
+  
+  if (status === 'completed') {
+    updates.completed_at = new Date().toISOString();
+  }
+
+  const { data, error } = await supabase
     .from('service_orders')
-    .update({ status })
+    .update(updates)
     .eq('id', orderId)
     .select()
     .single();
 
-  if (updErr) throw updErr;
+  if (error) throw error;
 
-  // Insert history (if table exists)
-  const { error: histErr } = await supabase.from('order_status_history').insert({
+  // Create status history entry
+  await createOrderStatusHistory({
     order_id: orderId,
     status,
     notes,
     created_by: createdBy,
   });
 
-  if (histErr) {
-    // history failure shouldn't break the UI
-    console.warn('⚠️ order_status_history insert failed:', histErr);
-  }
-
-  return order as ServiceOrder;
+  return data;
 }
 
 // Atualizar desconto da ordem de serviço
