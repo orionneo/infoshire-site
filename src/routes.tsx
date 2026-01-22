@@ -15,7 +15,6 @@ import AdminPopup from './pages/admin/AdminPopup';
 import AdminSettings from './pages/admin/AdminSettings';
 import AdminSiteSettings from './pages/admin/AdminSiteSettings';
 import AdminUserManagement from './pages/admin/AdminUserManagement';
-import AdminAnalytics from './pages/admin/AdminAnalytics';
 import AIKnowledgeAdmin from './pages/admin/AIKnowledgeAdmin';
 import WarrantySearch from './pages/admin/WarrantySearch';
 import WarrantyList from './pages/admin/WarrantyList';
@@ -220,11 +219,6 @@ const routes: RouteConfig[] = [
     name: 'Admin WhatsApp Settings',
     path: '/admin/whatsapp-settings',
     element: withAdminGuard(<AdminSettings />),
-  },
-  {
-    name: 'Admin Analytics',
-    path: '/admin/analytics',
-    element: withAdminGuard(<AdminAnalytics />),
   },
   {
     name: 'AI Knowledge Engine',

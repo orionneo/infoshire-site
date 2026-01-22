@@ -101,12 +101,7 @@ export default function AdminFinancial() {
       if (printWindow) {
         printWindow.document.write(content);
         printWindow.document.close();
-        printWindow.focus();
-        
-        // Aguardar um pouco para garantir que o conteúdo foi carregado
-        setTimeout(() => {
-          printWindow.print();
-        }, 250);
+        printWindow.print();
       }
 
       toast({
