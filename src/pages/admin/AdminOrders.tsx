@@ -412,24 +412,24 @@ const handleConfirmOrder = async () => {
 
   // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
   const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
-  const watchdog = window.setTimeout(async () => {
-    const elapsed = Date.now() - startedAt;
+  const watchdog = window.setTimeout(() => {
+    
+  const elapsed = Date.now() - startedAt;
     console.warn('[OS]', opId, 'WATCHDOG fired', { elapsed, vis: document.visibilityState });
 
-    try {
-      // tenta atualizar painel (se a OS tiver sido criada no backend, pode aparecer aqui)
-      await loadData();
-    } catch (e) {
-      console.warn('[OS]', opId, 'WATCHDOG loadData failed', e);
-    } finally {
-      setCreating(false);
-      toast({
-        title: 'Criação pausou em background',
-        description:
-          'Você trocou de aba e o navegador pode ter pausado a requisição. Recarreguei a lista; se a OS foi criada, ela vai aparecer. Se não aparecer, tente criar novamente.',
-        variant: 'destructive',
-      });
-    }
+    // ✅ 1) destrava UI IMEDIATAMENTE (não pode depender de await)
+    setCreating(false);
+
+    // ✅ 2) feedback pro usuário
+    toast({
+      title: 'A criação está demorando',
+      description:
+        'Se você trocou de aba, o navegador pode pausar requisições. Volte para esta aba e clique novamente em “Revisar e Confirmar”.',
+      variant: 'destructive',
+    });
+
+    // ✅ 3) tenta recarregar lista sem bloquear nada
+    void loadData().catch((e) => console.warn('[OS]', opId, 'WATCHDOG loadData failed', e));
   }, WATCHDOG_MS);
 
   const onVisibilityAbort = (reason: 'visibilitychange' | 'pagehide') => {
