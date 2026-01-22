@@ -21,7 +21,15 @@ import { Separator } from '@/components/ui/separator';
 import { SmartInput } from '@/components/ui/SmartInput';
 import { SmartTextarea } from '@/components/ui/SmartTextarea';
 import { Textarea } from '@/components/ui/textarea';
-import { createClientProfile, createServiceOrder, getAllProfiles, getAllServiceOrders, uploadOrderImage } from '@/db/api';
+import {
+  createClientProfile,
+  createServiceOrder,
+  generateOrderNumber,
+  getAllProfiles,
+  getAllServiceOrders,
+  getServiceOrderByOrderNumber,
+  uploadOrderImage,
+} from '@/db/api';
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
 import { useToast } from '@/hooks/use-toast';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
@@ -424,6 +432,10 @@ useEffect(() => {
         variant: 'destructive',
       });
 
+  const orderNumber = generateOrderNumber();
+
+  try {
+    let clientId = data.client_id;
       // ✅ 3) tenta recarregar lista sem bloquear nada
       void loadData().catch((e) => console.warn('[OS]', opId, 'WATCHDOG loadData failed', e));
     }, WATCHDOG_MS);
@@ -441,6 +453,26 @@ useEffect(() => {
         clientId = newClient.id;
       }
 
+    const order = await createServiceOrder(
+      {
+        client_id: clientId,
+        entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
+        equipment: data.equipment,
+        serial_number: data.serial_number,
+        problem_description: data.problem_description,
+        has_multiple_items: hasMultipleItems,
+        order_number: orderNumber,
+        items: hasMultipleItems
+          ? additionalItems.map((it) => ({
+              equipment: it.equipment,
+              serial_number: it.serial_number || undefined,
+              description: it.description || undefined,
+            }))
+          : undefined,
+      },
+      // ✅ ADMIN: timeout curto + vis-aware (NÃO 60s)
+      { allowOfflineQueue: false, timeoutMs: 15000, abortController }
+    );
       const order = await createServiceOrder(
         {
           client_id: clientId,
@@ -496,6 +528,37 @@ useEffect(() => {
     } catch (err: any) {
       console.error('❌ Falha ao criar OS:', err);
 
+    let recovered = false;
+    if (!didAbortFromVisibility && err?.name !== 'AbortError' && orderNumber) {
+      try {
+        const existingOrder = await getServiceOrderByOrderNumber(orderNumber);
+        if (existingOrder) {
+          recovered = true;
+          toast({
+            title: 'Ordem criada',
+            description: `OS ${existingOrder.order_number || existingOrder.id}`,
+          });
+
+          sessionStorage.removeItem(FORM_DRAFT_KEY);
+          sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
+
+          setShowConfirmation(false);
+          setDialogOpen(false);
+          form.reset();
+          setIsNewClient(false);
+          setHasMultipleItems(false);
+          setAdditionalItems([]);
+          setSelectedImages([]);
+          setPendingOrderData(null);
+
+          await loadData();
+        }
+      } catch (lookupError) {
+        console.warn('Falha ao buscar OS por order_number:', lookupError);
+      }
+    }
+
+    if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError') {
       toast({
         title: 'Erro ao criar OS',
         description:
@@ -505,6 +568,22 @@ useEffect(() => {
         variant: 'destructive',
       });
 
+    if (!recovered) {
+      // mantém rascunho do form (não apaga)
+      sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+    }
+  } finally {
+    clearTimeout(watchdog);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('pagehide', handlePageHide);
+    setCreating(false);
+    if (didAbortFromVisibility && !didAbortNotify) {
+      toast({
+        title: 'Criação interrompida em background',
+        description:
+          'A aba foi para segundo plano e a requisição foi cancelada. Verifique a lista de OS; se necessário, tente novamente.',
+        variant: 'destructive',
+      });
       // mantém rascunho do form (não apaga)
       sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
     } finally {
