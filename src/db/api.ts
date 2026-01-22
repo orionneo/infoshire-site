@@ -62,13 +62,17 @@ function withTimeoutVisAware<T>(
   return new Promise<T>((resolve, reject) => {
     const start = Date.now();
     let settled = false;
-    let t: any;
+    let t: ReturnType<typeof setTimeout> | null = null;
     let backgrounded = false;
     let abortListener: (() => void) | null = null;
+    let hiddenStartedAt: number | null = document.visibilityState === 'visible' ? null : Date.now();
+    let hiddenDurationMs = 0;
 
     const cleanup = () => {
       settled = true;
-      clearTimeout(t);
+      if (t) {
+        clearTimeout(t);
+      }
       document.removeEventListener('visibilitychange', onVisChange);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('focus', onFocus);
@@ -80,6 +84,11 @@ function withTimeoutVisAware<T>(
       }
     };
 
+    const getHiddenDuration = () =>
+      hiddenDurationMs + (hiddenStartedAt ? Date.now() - hiddenStartedAt : 0);
+
+    const getElapsedVisible = () => Date.now() - start - getHiddenDuration();
+
     const fail = (suffix?: string) => {
       const elapsed = Date.now() - start;
       cleanup();
@@ -87,8 +96,12 @@ function withTimeoutVisAware<T>(
     };
 
     const checkElapsed = (source: string) => {
-      const elapsed = Date.now() - start;
-      if (!settled && elapsed > ms) fail(source);
+      const elapsed = getElapsedVisible();
+      if (!settled && elapsed > ms) {
+        fail(source);
+        return true;
+      }
+      return false;
     };
 
     const onReturn = (source: string) => {
@@ -99,9 +112,16 @@ function withTimeoutVisAware<T>(
 
     const onVisChange = () => {
       if (document.visibilityState === 'visible') {
+        if (hiddenStartedAt) {
+          hiddenDurationMs += Date.now() - hiddenStartedAt;
+          hiddenStartedAt = null;
+        }
         onReturn('visibility');
       } else {
         backgrounded = true;
+        if (!hiddenStartedAt) {
+          hiddenStartedAt = Date.now();
+        }
       }
     };
 
@@ -109,14 +129,24 @@ function withTimeoutVisAware<T>(
     const onFocus = () => onReturn('focus');
     const onPageHide = () => {
       backgrounded = true;
+      if (!hiddenStartedAt) {
+        hiddenStartedAt = Date.now();
+      }
     };
     const onFreeze = () => {
       backgrounded = true;
+      if (!hiddenStartedAt) {
+        hiddenStartedAt = Date.now();
+      }
     };
     const onResume = () => {
       if (backgrounded) {
         onReturn('resume');
         backgrounded = false;
+        if (hiddenStartedAt) {
+          hiddenDurationMs += Date.now() - hiddenStartedAt;
+          hiddenStartedAt = null;
+        }
       }
     };
 
@@ -141,10 +171,24 @@ function withTimeoutVisAware<T>(
       abortSignal.addEventListener('abort', abortListener);
     }
 
+    const scheduleTimeout = () => {
+      if (settled) return;
+      const remainingMs = ms - getElapsedVisible();
+      if (remainingMs <= 0) {
+        fail('active');
+        return;
+      }
+      if (t) {
+        clearTimeout(t);
+      }
+      t = setTimeout(() => {
+        if (settled) return;
+        scheduleTimeout();
+      }, Math.min(Math.max(remainingMs, 250), 1000));
+    };
+
     // Timer normal (funciona quando aba está ativa)
-    t = setTimeout(() => {
-      if (!settled) fail('active');
-    }, ms);
+    scheduleTimeout();
 
     Promise.resolve(promiseLike).then(
       (v) => {
