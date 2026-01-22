@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Loader2, Plus, Search, Trash2, UserPlus, X, ChevronDown, ChevronUp } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
@@ -76,6 +76,7 @@ export default function AdminOrders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [tabStorageEnabled, setTabStorageEnabled] = useState(!secureTabStorage.isBlocked());
 
   // Ler filtros da URL ao carregar
   useEffect(() => {
@@ -103,6 +104,31 @@ export default function AdminOrders() {
   >([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [pendingOrderData, setPendingOrderData] = useState<any>(null);
+  const isCreatingStale = useMemo(
+    () => creatingSessionRef.current && Date.now() - creatingSessionRef.current.startedAt > 25000,
+    [creating]
+  );
+
+  useEffect(() => {
+    if (!isCreatingStale) return;
+    setCreating(false);
+    creatingSessionRef.current = null;
+  }, [isCreatingStale]);
+
+  const saveTabStorageItem = useCallback((key: string, value: string) => {
+    try {
+      const stored = secureTabStorage.setItem(key, value);
+      if (!stored) {
+        setTabStorageEnabled(false);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.warn(`Erro ao salvar "${key}" no storage de aba.`, error);
+      setTabStorageEnabled(false);
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
     if (!showConfirmation || !creating) {
@@ -213,14 +239,14 @@ export default function AdminOrders() {
 
   // Auto-salvar formulário a cada mudança
   useEffect(() => {
-    if (!dialogOpen) return;
+    if (!dialogOpen || !tabStorageEnabled) return;
 
     const subscription = form.watch((values) => {
-      secureTabStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(values));
+      saveTabStorageItem(FORM_DRAFT_KEY, JSON.stringify(values));
     });
 
     return () => subscription.unsubscribe();
-  }, [dialogOpen, form]);
+  }, [dialogOpen, form, saveTabStorageItem, tabStorageEnabled]);
 
   const loadData = useCallback(async () => {
     try {
@@ -594,12 +620,19 @@ export default function AdminOrders() {
     // Todas as validações passaram - mostrar confirmação
     setPendingOrderData(data);
     pendingOrderRef.current = data;
-    secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
-    secureTabStorage.setItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
+    if (!saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data))) {
+      return;
+    }
+    saveTabStorageItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
     setShowConfirmation(true);
   };
 
   const handleConfirmOrder = async () => {
+    if (creating && isCreatingStale) {
+      setCreating(false);
+      creatingSessionRef.current = null;
+    }
+
     const data = pendingOrderRef.current ?? readDraftFromStorage();
 
     if (!data) {
@@ -615,6 +648,7 @@ export default function AdminOrders() {
     setPendingOrderData(data);
     pendingOrderRef.current = data;
 
+    if (document.visibilityState !== 'visible') return;
     const hasFreshSession = await ensureFreshSession();
     if (!hasFreshSession) {
       toast({
@@ -630,7 +664,7 @@ export default function AdminOrders() {
     setCreating(true);
     const orderNumber = generateOrderNumber();
     const snapshot = { ...data, order_number: orderNumber };
-    secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(snapshot));
+    saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(snapshot));
     creatingSessionRef.current = {
       orderNumber,
       startedAt,
@@ -807,7 +841,7 @@ export default function AdminOrders() {
 
       if (!recovered) {
         // mantém rascunho do form (não apaga)
-        secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
       if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError' && !creatingSessionRef.current?.resolved) {
         finalizeCreationError(
@@ -833,7 +867,7 @@ export default function AdminOrders() {
           variant: 'destructive',
         });
         // mantém rascunho do form (não apaga)
-        secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
       if (creatingSessionRef.current?.opId === opId) {
         creatingSessionRef.current = null;
@@ -1474,6 +1508,7 @@ export default function AdminOrders() {
         onCancel={handleConfirmationCancel}
         loading={creating}
         forceEnabled={isCreatingStale}
+        loading={creating && !isCreatingStale}
       />
     </AdminLayout>
   );
