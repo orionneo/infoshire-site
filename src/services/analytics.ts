@@ -79,13 +79,35 @@ function isAnalyticsDisabled(): boolean {
 /**
  * Decide se deve rodar analytics nesta rota/ambiente.
  * - Não roda no /admin (admin não precisa de tracking público e pode causar erros/ruído)
+ * - Não roda em rotas de auth (login/register/reset etc) para não interferir com flows/sessão
  * - Não roda se estiver desabilitado por falhas anteriores (RLS/401/rede)
  * - Não roda para bots
  */
 export function shouldRunAnalytics(): boolean {
   try {
     const path = window.location?.pathname || '';
+
+    // ✅ Admin (nunca roda)
     if (path.startsWith('/admin')) return false;
+
+    // ✅ Rotas sensíveis de auth (não roda para não “concorrer” com login / session restore)
+    const authRoutes = [
+      '/login',
+      '/register',
+      '/auth/callback',
+      '/complete-profile',
+      '/forgot-password',
+      '/reset-password',
+      '/change-password',
+    ];
+    if (authRoutes.some((r) => path === r || path.startsWith(r + '/'))) return false;
+  } catch {
+    // ignore
+  }
+
+  // ✅ Não roda em background (evita AbortError por lifecycle do mobile/PWA)
+  try {
+    if (document.visibilityState !== 'visible') return false;
   } catch {
     // ignore
   }
@@ -135,6 +157,10 @@ function isAuthError(err: any): boolean {
   return status === 401 || msg.includes('unauthorized') || msg.includes('jwt') || msg.includes('invalid token');
 }
 
+function isAbortError(err: any): boolean {
+  return err?.name === 'AbortError' || String(err?.message || '').toLowerCase().includes('aborted');
+}
+
 function isNetworkError(err: any): boolean {
   const msg = String(err?.message || '').toLowerCase();
   return (
@@ -155,6 +181,14 @@ function logOncePer10s(...args: any[]) {
 }
 
 function handleAnalyticsError(context: string, err: any) {
+  // ✅ AbortError é normal em navegação/background no mobile/PWA
+  // Não desabilita analytics por 24h e não “polui” log.
+  if (isAbortError(err)) {
+    // no máximo loga raramente
+    logOncePer10s(`[ANALYTICS] ${context}:`, err);
+    return;
+  }
+
   // se forem erros de permissão, desliga por 24h
   if (isRlsOrPermissionError(err)) disableAnalyticsForMinutes(DISABLE_ON_RLS_MINUTES);
   if (isAuthError(err)) disableAnalyticsForMinutes(DISABLE_ON_AUTH_MINUTES);
@@ -376,7 +410,6 @@ export async function trackSessionStart(): Promise<boolean> {
 
     if (sessionError && !isConflictError(sessionError)) {
       handleAnalyticsError('Erro ao inserir sessão', sessionError);
-      // não derruba app
     }
 
     // 2) Inserir origem
@@ -404,6 +437,8 @@ export async function trackSessionStart(): Promise<boolean> {
   }
 }
 
+let __heartbeatListenersAttached = false;
+
 function startDurationHeartbeat() {
   if (durationUpdateInterval) clearInterval(durationUpdateInterval);
 
@@ -414,15 +449,20 @@ function startDurationHeartbeat() {
     void updateSessionDuration();
   }, HEARTBEAT_MS);
 
-  window.addEventListener('beforeunload', () => {
-    void updateSessionDuration();
-  });
+  // ✅ Evita anexar listeners múltiplas vezes (SPA)
+  if (!__heartbeatListenersAttached) {
+    __heartbeatListenersAttached = true;
 
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') {
+    window.addEventListener('beforeunload', () => {
       void updateSessionDuration();
-    }
-  });
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') {
+        void updateSessionDuration();
+      }
+    });
+  }
 }
 
 async function updateSessionDuration() {
@@ -460,9 +500,15 @@ export async function trackPageView(path: string, title: string): Promise<boolea
   try {
     if (!shouldRunAnalytics()) return false;
     if (!navigator.onLine) return false;
+    if (document.visibilityState !== 'visible') return false;
 
-    // ✅ Se o backend exige auth (RLS/policy), não tente rastrear sem sessão (evita 401 no console)
-    const { data: sessionData } = await supabase.auth.getSession();
+    // ✅ Não tenta rastrear se não houver sessão
+    // (evita chamadas supabase durante login / sem auth)
+    const { data: sessionData, error: sessErr } = await supabase.auth.getSession();
+    if (sessErr) {
+      handleAnalyticsError('Erro ao obter sessão (pageview)', sessErr);
+      return false;
+    }
     if (!sessionData?.session) return false;
 
     const sessionId = getSessionId();
@@ -471,8 +517,6 @@ export async function trackPageView(path: string, title: string): Promise<boolea
     const pageKey = `${sessionId}-${path}`;
     if (trackedPages.has(pageKey)) return true;
 
-    // IMPORTANTE:
-    // Não força "id" no upsert. Isso quebra se sua tabela não tiver id uuid ou tiver trigger/default.
     const { error } = await supabase
       .from('analytics_pageviews')
       .upsert(
@@ -502,7 +546,6 @@ export async function trackPageView(path: string, title: string): Promise<boolea
     });
 
     if (updateError && !isConflictError(updateError)) {
-      // não desliga 24h por erro de RPC; só por alguns minutos pra reduzir spam
       if (isNetworkError(updateError)) disableAnalyticsForMinutes(DISABLE_ON_NETWORK_MINUTES);
       logOncePer10s('[ANALYTICS] increment_page_count falhou (ok ignorar):', updateError);
     }
@@ -524,6 +567,11 @@ export async function trackEvent(eventType: string, eventLabel?: string, pagePat
   try {
     if (!shouldRunAnalytics()) return false;
     if (!navigator.onLine) return false;
+    if (document.visibilityState !== 'visible') return false;
+
+    // ✅ opcional: não rastreia sem sessão
+    const { data: sessionData } = await supabase.auth.getSession();
+    if (!sessionData?.session) return false;
 
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();

@@ -1,16 +1,36 @@
 import type { User } from '@supabase/supabase-js';
-import React, { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { supabase } from '@/db/supabase';
+import { supabase, ensureFreshSession } from '@/db/supabase';
 import type { Profile } from '@/types/types';
 
-export async function getProfile(userId: string): Promise<Profile | null> {
-  const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
-  if (error) {
-    console.error('Falha ao buscar profile:', error);
-    return null;
+function isAbortError(e: any) {
+  return e?.name === 'AbortError' || String(e?.message || '').toLowerCase().includes('aborted');
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function retryOnceOnAbort<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e: any) {
+    if (isAbortError(e)) {
+      await sleep(150);
+      return await fn();
+    }
+    throw e;
   }
-  return data as Profile | null;
+}
+
+export async function getProfile(userId: string): Promise<Profile | null> {
+  return await retryOnceOnAbort(async () => {
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+    if (error) {
+      console.error('Falha ao buscar profile:', error);
+      return null;
+    }
+    return data as Profile | null;
+  });
 }
 
 async function ensureProfile(user: User): Promise<Profile | null> {
@@ -34,7 +54,9 @@ async function ensureProfile(user: User): Promise<Profile | null> {
         role: ('client' as any),
       };
 
-      const { data, error } = await supabase.from('profiles').upsert(payload, { onConflict: 'id' }).select('*').single();
+      const { data, error } = await retryOnceOnAbort(async () =>
+        await supabase.from('profiles').upsert(payload, { onConflict: 'id' }).select('*').single()
+      );
       if (error) {
         console.error('Falha ao criar profile:', error);
         return null;
@@ -47,17 +69,19 @@ async function ensureProfile(user: User): Promise<Profile | null> {
     const shouldUpdatePhone = (!existing.phone || String(existing.phone).trim() === '') && !!phoneFromMeta;
 
     if (shouldUpdateName || shouldUpdateEmail || shouldUpdatePhone) {
-      const { data, error } = await supabase
-        .from('profiles')
-        .update({
-          ...(shouldUpdateName ? { name: nameFromMeta } : {}),
-          ...(shouldUpdateEmail ? { email: user.email } : {}),
-          ...(shouldUpdatePhone ? { phone: phoneFromMeta } : {}),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', user.id)
-        .select('*')
-        .single();
+      const { data, error } = await retryOnceOnAbort(async () =>
+        await supabase
+          .from('profiles')
+          .update({
+            ...(shouldUpdateName ? { name: nameFromMeta } : {}),
+            ...(shouldUpdateEmail ? { email: user.email } : {}),
+            ...(shouldUpdatePhone ? { phone: phoneFromMeta } : {}),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id)
+          .select('*')
+          .single()
+      );
 
       if (error) {
         console.error('Falha ao atualizar profile (metadata):', error);
@@ -110,6 +134,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // ✅ evita concorrência (múltiplos ensureProfile ao mesmo tempo)
+  const ensureProfileInFlight = useRef<Promise<Profile | null> | null>(null);
+
   const refreshProfile = async () => {
     if (!user) {
       setProfile(null);
@@ -134,24 +161,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-    const safeGetSession = async () => {
-      try {
-        return await supabase.auth.getSession();
-      } catch (e: any) {
-        // ✅ Retry 1x se for AbortError do lock interno
-        if (e?.name === 'AbortError') {
-          await sleep(150);
-          return await supabase.auth.getSession();
-        }
-        throw e;
-      }
-    };
-
     const init = async () => {
       try {
-        const { data } = await safeGetSession();
+        // ✅ evita sessão “meio vencida” após background/tab switch
+        await ensureFreshSession(60);
+
+        const { data } = await retryOnceOnAbort(async () => await supabase.auth.getSession());
         const sessionUser = data.session?.user ?? null;
 
         if (!mounted) return;
@@ -159,7 +174,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(sessionUser);
 
         if (sessionUser) {
-          const p = await ensureProfile(sessionUser);
+          // serializa ensureProfile
+          ensureProfileInFlight.current ??= ensureProfile(sessionUser);
+          const p = await ensureProfileInFlight.current;
+          ensureProfileInFlight.current = null;
+
           if (!mounted) return;
           setProfile(p);
         } else {
@@ -175,7 +194,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     };
 
-    init();
+    void init();
 
     const {
       data: { subscription },
@@ -185,7 +204,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         if (sessionUser) {
-          const p = await ensureProfile(sessionUser);
+          await ensureFreshSession(60);
+          ensureProfileInFlight.current ??= ensureProfile(sessionUser);
+          const p = await ensureProfileInFlight.current;
+          ensureProfileInFlight.current = null;
           setProfile(p);
         } else {
           setProfile(null);
@@ -206,7 +228,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const isEmail = username.includes('@');
       const email = isEmail ? username : `${username}@miaoda.com`;
 
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await retryOnceOnAbort(async () => await supabase.auth.signInWithPassword({ email, password }));
       if (error) throw error;
 
       return { error: null };
@@ -218,7 +240,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUpWithUsername = async (username: string, password: string) => {
     try {
       const email = `${username}@miaoda.com`;
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { error } = await retryOnceOnAbort(async () => await supabase.auth.signUp({ email, password }));
       if (error) throw error;
 
       return { error: null };
@@ -231,11 +253,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const email = data.email || `${data.phone.replace(/\D/g, '')}@temp.infoshire.com`;
 
-      const { error } = await supabase.auth.signUp({
-        email,
-        password: data.password,
-        options: { data: { name: data.name, phone: data.phone } },
-      });
+      const { error } = await retryOnceOnAbort(async () =>
+        await supabase.auth.signUp({
+          email,
+          password: data.password,
+          options: { data: { name: data.name, phone: data.phone } },
+        })
+      );
 
       if (error) throw error;
       return { error: null };
@@ -245,25 +269,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
-  try {
-    // ✅ volta para a base do GH Pages (sem hash)
-    const base = import.meta.env.BASE_URL || '/';
-    const redirectTo = `${window.location.origin}${base}`;
+    try {
+      const base = import.meta.env.BASE_URL || '/';
+      const redirectTo = `${window.location.origin}${base}`;
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo,
-        queryParams: { access_type: 'offline', prompt: 'consent' },
-      },
-    });
+      const { error } = await retryOnceOnAbort(async () =>
+        await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo,
+            queryParams: { access_type: 'offline', prompt: 'consent' },
+          },
+        })
+      );
 
-    if (error) throw error;
-    return { error: null };
-  } catch (error) {
-    return { error: error as Error };
-  }
-};
+      if (error) throw error;
+      return { error: null };
+    } catch (error) {
+      return { error: error as Error };
+    }
+  };
 
   const signOut = async () => {
     await supabase.auth.signOut();
