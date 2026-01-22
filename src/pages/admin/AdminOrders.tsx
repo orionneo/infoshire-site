@@ -223,6 +223,27 @@ export default function AdminOrders() {
     filterOrders();
   }, [orders, searchTerm, statusFilter]);
 
+  useEffect(() => {
+    if (!showConfirmation) return;
+
+    const handleResume = () => {
+      setCreating(false);
+      if (creatingSessionRef.current?.resolved === false) {
+        creatingSessionRef.current = null;
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleResume);
+    window.addEventListener('pageshow', handleResume);
+    window.addEventListener('focus', handleResume);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleResume);
+      window.removeEventListener('pageshow', handleResume);
+      window.removeEventListener('focus', handleResume);
+    };
+  }, [showConfirmation]);
+
   const resetCreationForm = useCallback(() => {
     setShowConfirmation(false);
     setDialogOpen(false);
