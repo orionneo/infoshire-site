@@ -18,26 +18,13 @@ function AppShell() {
   const location = useLocation();
 
   // Mostra checagem de conexão APENAS em rotas autenticadas
-  const showConnectionStatus =
-    location.pathname.startsWith('/admin') || location.pathname.startsWith('/client');
-
-  const isAdminRoute = () => {
-    try {
-      const hash = window.location.hash || '';
-      if (hash.startsWith('#/')) {
-        const p = hash.slice(1);
-        return p.startsWith('/admin');
-      }
-      return (window.location.pathname || '').startsWith('/admin');
-    } catch {
-      return false;
-    }
-  };
+  const showConnectionStatus = location.pathname.startsWith('/client');
 
   useEffect(() => {
+  // 🚫 Admin NÃO usa fila offline e esse drain em "visibilitychange" pode gerar lock/AbortError no Supabase Auth
+  if (location.pathname.startsWith('/admin')) return;
+
   const drain = () => {
-    // ✅ No admin: não rodar offline queue / autosync (evita lock/Abort)
-    if (isAdminRoute()) return;
     // não bloqueia UI, só tenta sincronizar
     void processOfflineQueue();
   };
@@ -72,7 +59,8 @@ function AppShell() {
     document.removeEventListener('visibilitychange', onVisibility);
     window.clearTimeout(t);
   };
-}, []);
+}, [location.pathname]);
+
 
   return (
     <AuthProvider>
