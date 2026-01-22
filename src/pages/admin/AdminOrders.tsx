@@ -398,151 +398,104 @@ useEffect(() => {
     setShowConfirmation(true);
   };
 
-const handleConfirmOrder = async () => {
-  if (!pendingOrderData) return;
+  const handleConfirmOrder = async () => {
+    if (!pendingOrderData) return;
 
-  const data = pendingOrderData;
+    const data = pendingOrderData;
 
-  const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-  const startedAt = Date.now();
-  const abortController = new AbortController();
-  let didAbortFromVisibility = false;
-  let didAbortNotify = false;
-  let cleanupTriggered = false;
+    const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const startedAt = Date.now();
+    setCreating(true);
 
-  setCreating(true);
+    // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
+    const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
+    const watchdog = window.setTimeout(() => {
+      const elapsed = Date.now() - startedAt;
+      console.warn('[OS]', opId, 'WATCHDOG fired', { elapsed, vis: document.visibilityState });
 
-  // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
-  const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
-  const watchdog = window.setTimeout(() => {
-    const elapsed = Date.now() - startedAt;
-    console.warn('[OS]', opId, 'WATCHDOG fired', { elapsed, vis: document.visibilityState });
+      // ✅ 1) destrava UI IMEDIATAMENTE (não pode depender de await)
+      setCreating(false);
 
-    // ✅ 1) destrava UI IMEDIATAMENTE (não pode depender de await)
-    setCreating(false);
-
-    // ✅ 2) feedback pro usuário
-    toast({
-      title: 'A criação está demorando',
-      description:
-        'Se você trocou de aba, o navegador pode pausar requisições. Volte para esta aba e clique novamente em “Revisar e Confirmar”.',
-      variant: 'destructive',
-    });
-
-    // ✅ 3) tenta recarregar lista sem bloquear nada
-    void loadData().catch((e) => console.warn('[OS]', opId, 'WATCHDOG loadData failed', e));
-  }, WATCHDOG_MS);
-
-  const cleanupImmediate = (reason: 'visibilitychange' | 'pagehide') => {
-    if (cleanupTriggered) return;
-    cleanupTriggered = true;
-    clearTimeout(watchdog);
-    setCreating(false);
-    if (!didAbortNotify) {
-      didAbortNotify = true;
+      // ✅ 2) feedback pro usuário
       toast({
-        title: 'Criação interrompida em background',
+        title: 'A criação está demorando',
         description:
-          'A aba foi para segundo plano e a requisição foi cancelada. Verifique a lista de OS; se necessário, tente novamente.',
+          'Se você trocou de aba, o navegador pode pausar requisições. A criação pode concluir em segundo plano; volte para esta aba para conferir ou tente novamente.',
         variant: 'destructive',
       });
-    }
-    void loadData().catch((e) => console.warn('[OS]', opId, 'abort loadData failed', e));
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-    window.removeEventListener('pagehide', handlePageHide);
-    console.warn('[OS]', opId, 'cleanup immediate due to', reason);
-  };
 
-  const onVisibilityAbort = (reason: 'visibilitychange' | 'pagehide') => {
-    if (abortController.signal.aborted) return;
-    didAbortFromVisibility = true;
-    console.error(`[OS] ${opId} abortado (${reason})`);
-    abortController.abort();
-    cleanupImmediate(reason);
-  };
+      // ✅ 3) tenta recarregar lista sem bloquear nada
+      void loadData().catch((e) => console.warn('[OS]', opId, 'WATCHDOG loadData failed', e));
+    }, WATCHDOG_MS);
 
-  const handleVisibilityChange = () => {
-    if (document.visibilityState === 'hidden') {
-      onVisibilityAbort('visibilitychange');
-    }
-  };
+    try {
+      let clientId = data.client_id;
 
-  const handlePageHide = () => {
-    onVisibilityAbort('pagehide');
-  };
+      if (isNewClient) {
+        const newClient = await createClientProfile({
+          name: `${data.new_client_first_name} ${data.new_client_last_name}`,
+          email: data.new_client_email,
+          phone: data.new_client_phone,
+          password: data.new_client_password,
+        });
+        clientId = newClient.id;
+      }
 
-  document.addEventListener('visibilitychange', handleVisibilityChange);
-  window.addEventListener('pagehide', handlePageHide);
+      const order = await createServiceOrder(
+        {
+          client_id: clientId,
+          entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
+          equipment: data.equipment,
+          serial_number: data.serial_number,
+          problem_description: data.problem_description,
+          has_multiple_items: hasMultipleItems,
+          items: hasMultipleItems
+            ? additionalItems.map((it) => ({
+                equipment: it.equipment,
+                serial_number: it.serial_number || undefined,
+                description: it.description || undefined,
+              }))
+            : undefined,
+        },
+        // ✅ ADMIN: timeout curto + vis-aware (NÃO 60s)
+        { allowOfflineQueue: false, timeoutMs: 15000 }
+      );
 
-  try {
-    let clientId = data.client_id;
-
-    if (isNewClient) {
-      const newClient = await createClientProfile({
-        name: `${data.new_client_first_name} ${data.new_client_last_name}`,
-        email: data.new_client_email,
-        phone: data.new_client_phone,
-        password: data.new_client_password,
-      });
-      clientId = newClient.id;
-    }
-
-    const order = await createServiceOrder(
-      {
-        client_id: clientId,
-        entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
-        equipment: data.equipment,
-        serial_number: data.serial_number,
-        problem_description: data.problem_description,
-        has_multiple_items: hasMultipleItems,
-        items: hasMultipleItems
-          ? additionalItems.map((it) => ({
-              equipment: it.equipment,
-              serial_number: it.serial_number || undefined,
-              description: it.description || undefined,
-            }))
-          : undefined,
-      },
-      // ✅ ADMIN: timeout curto + vis-aware (NÃO 60s)
-      { allowOfflineQueue: false, timeoutMs: 15000, abortController }
-    );
-
-    // ✅ Upload de imagens: não “quebra” a criação se falhar upload
-    if (selectedImages.length > 0) {
-      for (const file of selectedImages) {
-        try {
-          await uploadOrderImage(order.id, file);
-        } catch (e) {
-          console.warn('Upload falhou (não bloqueia OS):', e);
+      // ✅ Upload de imagens: não “quebra” a criação se falhar upload
+      if (selectedImages.length > 0) {
+        for (const file of selectedImages) {
+          try {
+            await uploadOrderImage(order.id, file);
+          } catch (e) {
+            console.warn('Upload falhou (não bloqueia OS):', e);
+          }
         }
       }
-    }
 
-    toast({
-      title: 'Ordem criada',
-      description: `OS ${order.order_number || order.id}`,
-    });
+      toast({
+        title: 'Ordem criada',
+        description: `OS ${order.order_number || order.id}`,
+      });
 
-    // ✅ limpa drafts e fecha diálogos
-    sessionStorage.removeItem(FORM_DRAFT_KEY);
-    sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
+      // ✅ limpa drafts e fecha diálogos
+      sessionStorage.removeItem(FORM_DRAFT_KEY);
+      sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
 
-    setShowConfirmation(false);
-    setDialogOpen(false);
+      setShowConfirmation(false);
+      setDialogOpen(false);
 
-    // ✅ reset total do estado
-    form.reset();
-    setIsNewClient(false);
-    setHasMultipleItems(false);
-    setAdditionalItems([]);
-    setSelectedImages([]);
-    setPendingOrderData(null);
+      // ✅ reset total do estado
+      form.reset();
+      setIsNewClient(false);
+      setHasMultipleItems(false);
+      setAdditionalItems([]);
+      setSelectedImages([]);
+      setPendingOrderData(null);
 
-    await loadData(); // ✅ aqui é melhor await
-  } catch (err: any) {
-    console.error('❌ Falha ao criar OS:', err);
+      await loadData(); // ✅ aqui é melhor await
+    } catch (err: any) {
+      console.error('❌ Falha ao criar OS:', err);
 
-    if (!didAbortFromVisibility && err?.name !== 'AbortError') {
       toast({
         title: 'Erro ao criar OS',
         description:
@@ -551,25 +504,14 @@ const handleConfirmOrder = async () => {
             : err?.message || 'Falha inesperada ao criar a OS.',
         variant: 'destructive',
       });
-    }
 
-    // mantém rascunho do form (não apaga)
-    sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
-  } finally {
-    clearTimeout(watchdog);
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-    window.removeEventListener('pagehide', handlePageHide);
-    setCreating(false);
-    if (didAbortFromVisibility && !didAbortNotify) {
-      toast({
-        title: 'Criação interrompida em background',
-        description:
-          'A aba foi para segundo plano e a requisição foi cancelada. Verifique a lista de OS; se necessário, tente novamente.',
-        variant: 'destructive',
-      });
+      // mantém rascunho do form (não apaga)
+      sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+    } finally {
+      clearTimeout(watchdog);
+      setCreating(false);
     }
-  }
-};
+  };
 
 
 
