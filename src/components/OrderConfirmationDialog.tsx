@@ -40,6 +40,7 @@ interface OrderConfirmationDialogProps {
   onConfirm: () => void;
   onCancel?: () => void;
   loading?: boolean;
+  forceEnabled?: boolean;
 }
 
 export function OrderConfirmationDialog({
@@ -49,6 +50,7 @@ export function OrderConfirmationDialog({
   onConfirm,
   onCancel,
   loading = false,
+  forceEnabled = false,
 }: OrderConfirmationDialogProps) {
   const {
     client,
@@ -310,7 +312,7 @@ export function OrderConfirmationDialog({
           <Button
             type="button"
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading && !forceEnabled}
             className="min-w-[140px]"
           >
             {loading ? (
