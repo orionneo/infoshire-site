@@ -13,7 +13,7 @@ import type {
   ServiceOrderWithClient,
   SiteSetting,
 } from '@/types/types';
-import { supabase } from './supabase';
+import { supabase, wakeSupabase } from './supabase';
 import { getOrderImagesBucket } from '@/db/storage';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -247,10 +247,95 @@ export async function createServiceOrder(
   },
   options: CreateServiceOrderOptions = {}
 ): Promise<ServiceOrder> {
-  // TODO: implementar (o corpo foi removido durante correções de merge)
-  // Evita quebrar o build enquanto você cola a implementação final
-  console.warn('createServiceOrder stub called', { order, options });
-  throw new Error('createServiceOrder ainda não implementada neste arquivo');
+  // ✅ Mantemos simples e confiável (como no app original):
+  // - sempre online (admin/web/pwa)
+  // - timeouts para evitar "loading infinito" quando o PWA volta do background
+  // - se não houver sessão, falha com mensagem clara (sem fila offline)
+
+  const overallTimeoutMs = options.timeoutMs ?? 60000;
+
+  // 0) Garantir sessão "acordada" (refresh token / validação)
+  const session = await wakeSupabase('createServiceOrder');
+  if (!session) {
+    const e: any = new Error('Sessão expirada. Faça login novamente.');
+    e.code = 'AUTH_REQUIRED';
+    throw e;
+  }
+
+  if (!isOnlineNow()) {
+    // ✅ Admin/PWA: sem conexão = não dá para gerar número da OS (RPC)
+    const e: any = new Error('Sem conexão no momento. Verifique sua internet e tente novamente.');
+    e.code = 'OFFLINE';
+    throw e;
+  }
+
+  const work = async (): Promise<ServiceOrder> => {
+    // 1) Gerar número da OS (RPC)
+    const { data: orderNumber, error: numberError } = await withTimeout(
+      supabase.rpc('generate_order_number'),
+      20000,
+      'generate_order_number'
+    );
+    if (numberError) throw numberError;
+
+    // 2) Inserir OS (idempotência não é obrigatória aqui; manter fluxo simples)
+    const { data, error } = await withTimeout(
+      supabase
+        .from('service_orders')
+        .insert({
+          client_id: order.client_id,
+          equipment: order.equipment,
+          serial_number: order.serial_number || null,
+          entry_date: order.entry_date || new Date().toISOString(),
+          equipment_photo_url: order.equipment_photo_url || null,
+          problem_description: order.problem_description,
+          estimated_completion: order.estimated_completion || null,
+          has_multiple_items: order.has_multiple_items || false,
+          order_number: orderNumber,
+        })
+        .select()
+        .single(),
+      20000,
+      'insert service_orders'
+    );
+    if (error) throw error;
+
+    // 3) Criar histórico inicial
+    const { data: userRes, error: userErr } = await withTimeout(supabase.auth.getUser(), 15000, 'auth.getUser');
+    if (userErr) throw userErr;
+    const createdBy = userRes.user?.id ?? order.client_id;
+
+    await withTimeout(
+      createOrderStatusHistory({
+        order_id: data.id,
+        status: 'received',
+        notes: 'Ordem de serviço criada',
+        created_by: createdBy,
+      }),
+      15000,
+      'createOrderStatusHistory'
+    );
+
+    // 4) Itens adicionais (se houver)
+    if (order.items && order.items.length > 0) {
+      await withTimeout(createServiceOrderItems(data.id, order.items), 20000, 'createServiceOrderItems');
+    }
+
+    return data as ServiceOrder;
+  };
+
+  try {
+    return await withTimeout(work(), overallTimeoutMs, 'createServiceOrder(overall)');
+  } catch (err: any) {
+    // Mensagens mais amigáveis
+    if (isTimeoutErr(err)) {
+      throw new Error('A criação da OS demorou demais (timeout). Tente novamente.');
+    }
+    if (isNetworkErr(err)) {
+      throw new Error('Falha de conexão ao criar a OS. Verifique sua internet e tente novamente.');
+    }
+    throw err;
+  }
 }
 
 export async function updateServiceOrder(
