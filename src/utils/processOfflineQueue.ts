@@ -15,6 +15,7 @@ export async function processOfflineQueue() {
     try {
       // ✅ Se a sessão expirou, pare aqui para evitar loops.
       try {
+        if (document.visibilityState !== 'visible') return;
         await ensureFreshSession(60);
       } catch (e: any) {
         await markTaskFailed(task.id, e?.message || 'Sessão expirada. Faça login para sincronizar.');
