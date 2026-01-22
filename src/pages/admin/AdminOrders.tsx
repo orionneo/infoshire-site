@@ -75,6 +75,7 @@ export default function AdminOrders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [tabStorageEnabled, setTabStorageEnabled] = useState(!secureTabStorage.isBlocked());
 
   // Ler filtros da URL ao carregar
   useEffect(() => {
@@ -111,6 +112,21 @@ export default function AdminOrders() {
     setCreating(false);
     creatingSessionRef.current = null;
   }, [isCreatingStale]);
+
+  const saveTabStorageItem = useCallback((key: string, value: string) => {
+    try {
+      const stored = secureTabStorage.setItem(key, value);
+      if (!stored) {
+        setTabStorageEnabled(false);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.warn(`Erro ao salvar "${key}" no storage de aba.`, error);
+      setTabStorageEnabled(false);
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
     if (!showConfirmation) return;
@@ -201,14 +217,14 @@ export default function AdminOrders() {
 
   // Auto-salvar formulário a cada mudança
   useEffect(() => {
-    if (!dialogOpen) return;
+    if (!dialogOpen || !tabStorageEnabled) return;
 
     const subscription = form.watch((values) => {
-      secureTabStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(values));
+      saveTabStorageItem(FORM_DRAFT_KEY, JSON.stringify(values));
     });
 
     return () => subscription.unsubscribe();
-  }, [dialogOpen, form]);
+  }, [dialogOpen, form, saveTabStorageItem, tabStorageEnabled]);
 
   const loadData = useCallback(async () => {
     try {
@@ -582,8 +598,10 @@ export default function AdminOrders() {
     // Todas as validações passaram - mostrar confirmação
     setPendingOrderData(data);
     pendingOrderRef.current = data;
-    secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
-    secureTabStorage.setItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
+    if (!saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data))) {
+      return;
+    }
+    saveTabStorageItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
     setShowConfirmation(true);
   };
 
@@ -623,7 +641,7 @@ export default function AdminOrders() {
     setCreating(true);
     const orderNumber = generateOrderNumber();
     const snapshot = { ...data, order_number: orderNumber };
-    secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(snapshot));
+    saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(snapshot));
     creatingSessionRef.current = {
       orderNumber,
       startedAt,
@@ -801,7 +819,7 @@ export default function AdminOrders() {
 
       if (!recovered) {
         // mantém rascunho do form (não apaga)
-        secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
       if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError' && !creatingSessionRef.current?.resolved) {
         finalizeCreationError(
@@ -827,7 +845,7 @@ export default function AdminOrders() {
           variant: 'destructive',
         });
         // mantém rascunho do form (não apaga)
-        secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
       if (creatingSessionRef.current?.opId === opId) {
         creatingSessionRef.current = null;
