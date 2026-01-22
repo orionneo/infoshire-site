@@ -13,7 +13,7 @@ import type {
   ServiceOrderWithClient,
   SiteSetting,
 } from '@/types/types';
-import { supabase, ensureFreshSession } from './supabase';
+import { supabase } from './supabase';
 import { getOrderImagesBucket } from '@/db/storage';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -225,12 +225,14 @@ export async function createServiceOrder(
 ): Promise<ServiceOrder> {
   const timeoutMs = options.timeoutMs ?? 15000;
 
-  // ✅ Garantir sessão válida (evita 401/RLS e "travadas" após trocar de aba/PWA background)
-  await ensureFreshSession(60);
-  const { data: userData, error: userErr } = await supabase.auth.getUser();
-  if (userErr) throw userErr;
-  if (!userData.user) throw new Error('Sessão expirada. Faça login novamente.');
-
+  // ✅ Exigir sessão: evita POST sem JWT (vira 401/RLS e fica "travando")
+  const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+  if (sessionErr) {
+    throw sessionErr;
+  }
+  if (!sessionData.session?.user) {
+    throw new Error('Sessão expirada. Faça login novamente.');
+  }
 
   // ADMIN deve criar online. Se estiver offline, falha rápido e claro.
   if (!navigator.onLine) {
@@ -296,16 +298,27 @@ export async function createServiceOrder(
 
   // Histórico inicial (opcional)
   // Observação: se sua RLS bloquear, ajuste as policies (ver SQL do fix).
-  const historyRes = await supabase.from('order_status_history').insert({
-    order_id: created.id,
-    status: 'received',
-    notes: 'Ordem de serviço criada',
-    created_by: userData.user.id,
-  });
-  // Se não der permissão para histórico, não travamos a criação da OS:
-  if (historyRes.error) {
+  // Histórico inicial (opcional)
+  // ⚠️ Importante: em PWA/mobile, trocar de aba pode pausar requests.
+  // Então este passo NÃO pode travar a criação da OS.
+  try {
+    const historyRes = await withTimeout(
+      supabase.from('order_status_history').insert({
+        order_id: created.id,
+        status: 'received',
+        notes: 'Ordem de serviço criada',
+        created_by: sessionData.session.user.id,
+      }),
+      5000,
+      'create_order_status_history timeout'
+    );
+
+    // Se não der permissão para histórico, não travamos a criação da OS:
     // eslint-disable-next-line no-console
-    console.warn('Falha ao criar histórico inicial:', historyRes.error);
+    if ((historyRes as any)?.error) console.warn('Falha ao criar histórico inicial:', (historyRes as any).error);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn('Histórico inicial não foi gravado (ignorado):', e);
   }
 
   return created;
