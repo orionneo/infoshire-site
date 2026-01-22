@@ -1,39 +1,43 @@
 import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  // Mantém o erro explícito (ajuda a debugar em produção)
   // eslint-disable-next-line no-console
   console.error('❌ Missing Supabase env vars: VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY');
   throw new Error('Missing Supabase env vars: VITE_SUPABASE_URL and/or VITE_SUPABASE_ANON_KEY');
 }
 
 /**
- * ✅ Config simples e robusta (próxima do projeto original do medo.dev):
- * - persistSession + autoRefreshToken para PWA ficar estável ao trocar de aba / minimizar
- * - detectSessionInUrl para OAuth callback funcionar (Google)
- * - usa localStorage padrão (mais resiliente que sessionStorage em PWA)
+ * Keep Supabase simple and stable (like the original medo.dev project):
+ * - Persist session in localStorage (default)
+ * - Auto-refresh tokens (so PWA/tab switching keeps working)
+ * - Detect OAuth session on callback URL
  */
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
+    // Keep as implicit to avoid breaking your current working Google OAuth setup.
+    flowType: 'implicit',
+    storageKey: 'infoshire-auth',
   },
 });
 
 /**
- * "Acorda" a sessão antes de chamadas sensíveis (ex: criar OS) e evita estados travados
- * quando o PWA volta do background.
+ * Small "wake up" helper used by some parts of the app to make sure the session is hydrated
+ * and the network path to Supabase is alive. Safe no-op when offline.
  */
-export async function wakeSupabase(_reason: string = 'wake'): Promise<import('@supabase/supabase-js').Session | null> {
+export async function wakeSupabase(_reason: string = 'wake') {
   try {
-    const { data, error } = await supabase.auth.getSession();
-    if (error) return null;
-    return data.session ?? null;
+    // hydrate session (no network if cached)
+    await supabase.auth.getSession();
+    // lightweight ping (network)
+    await supabase.from('profiles').select('id').limit(1);
   } catch {
-    return null;
+    // ignore — offline / transient
   }
 }
