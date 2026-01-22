@@ -1,16 +1,6 @@
 // src/utils/autoSync.ts
 import { supabase } from '@/db/supabase';
 
-function isAdminRoute(): boolean {
-  try {
-    const hash = window.location.hash || '';
-    if (hash.startsWith('#/')) return hash.slice(1).startsWith('/admin');
-    return (window.location.pathname || '').startsWith('/admin');
-  } catch {
-    return false;
-  }
-}
-
 export type SyncStatus = {
   // legacy fields (o SyncStatusBadge espera isso)
   online: boolean;
@@ -52,6 +42,7 @@ export function subscribeSyncStatus(fn: Listener): () => void {
 
 // Ping simples (sem fila/offline)
 export async function runAutoSync(reason: string = 'autoSync'): Promise<void> {
+  if (window.location.hash.startsWith('#/admin') || window.location.pathname.startsWith('/admin')) return;
   status.online = typeof navigator !== 'undefined' ? navigator.onLine : true;
   status.syncing = true;
   status.lastReason = reason;
