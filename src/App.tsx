@@ -22,10 +22,15 @@ function AppShell() {
     location.pathname.startsWith('/admin') || location.pathname.startsWith('/client');
 
   useEffect(() => {
-  const drain = () => {
-    // não bloqueia UI, só tenta sincronizar
-    void processOfflineQueue();
-  };
+const isAdminRoute = () => {
+  const h = window.location.hash || '';
+  return h.startsWith('#/admin');
+};
+
+const drain = () => {
+  if (isAdminRoute()) return; // ✅ admin não drena fila automaticamente
+  void processOfflineQueue();
+};
 
   const onOnline = () => {
     console.log('🌐 Conexão restaurada, processando fila offline...');
