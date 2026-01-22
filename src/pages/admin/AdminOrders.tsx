@@ -30,7 +30,6 @@ import {
   getServiceOrderByOrderNumber,
   uploadOrderImage,
 } from '@/db/api';
-import { ensureFreshSession } from '@/db/supabase';
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
 import { safeStorage } from '@/utils/safeStorage';
 import { secureTabStorage } from '@/utils/secureTabStorage';
@@ -301,7 +300,10 @@ export default function AdminOrders() {
     const draftValue =
       secureTabStorage.getItem(PENDING_CONFIRMATION_KEY) ||
       secureTabStorage.getItem('ORDER_DRAFT_FALLBACK') ||
-      secureTabStorage.getItem(FORM_DRAFT_KEY);
+      secureTabStorage.getItem(FORM_DRAFT_KEY) ||
+      safeStorage.getItem(PENDING_CONFIRMATION_KEY) ||
+      safeStorage.getItem('ORDER_DRAFT_FALLBACK') ||
+      safeStorage.getItem(FORM_DRAFT_KEY);
     if (!draftValue) return null;
 
     try {
@@ -491,9 +493,15 @@ export default function AdminOrders() {
   };
 
   const handleConfirmOrder = async () => {
+    if (import.meta.env.DEV) {
+      console.info('[ADMIN][OS] confirm click');
+    }
     const data = pendingOrderRef.current ?? readDraftFromStorage();
 
     if (!data) {
+      if (import.meta.env.DEV) {
+        console.info('[ADMIN][OS] confirm blocked: missing draft');
+      }
       toast({
         title: 'Dados da OS não encontrados',
         description: 'Não foi possível recuperar o rascunho. Revise a confirmação e tente novamente.',
@@ -532,6 +540,9 @@ export default function AdminOrders() {
       let clientId = data.client_id;
 
       if (isNewClient) {
+        if (import.meta.env.DEV) {
+          console.info('[ADMIN][OS] creating client profile');
+        }
         const newClient = await createClientProfile({
           name: `${data.new_client_first_name} ${data.new_client_last_name}`,
           email: data.new_client_email,
@@ -541,6 +552,9 @@ export default function AdminOrders() {
         clientId = newClient.id;
       }
 
+      if (import.meta.env.DEV) {
+        console.info('[ADMIN][OS] calling createServiceOrder', { orderNumber });
+      }
       const order = await createServiceOrder(
         {
           client_id: clientId,
@@ -559,6 +573,9 @@ export default function AdminOrders() {
             : undefined,
         }
       );
+      if (import.meta.env.DEV) {
+        console.info('[ADMIN][OS] createServiceOrder resolved', { orderId: order.id });
+      }
 
       // ✅ Upload de imagens: não “quebra” a criação se falhar upload
       if (selectedImages.length > 0) {
@@ -598,6 +615,9 @@ export default function AdminOrders() {
       await finalizeCreationSuccess(order, '');
     } catch (err: any) {
       console.error('❌ Falha ao criar OS:', err);
+      if (import.meta.env.DEV) {
+        console.info('[ADMIN][OS] createServiceOrder failed', err);
+      }
 
       let recovered = false;
       if (err?.name !== 'AbortError' && orderNumber) {
