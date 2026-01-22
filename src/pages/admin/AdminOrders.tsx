@@ -483,7 +483,9 @@ export default function AdminOrders() {
       resolved: false,
     };
     const abortController = new AbortController();
-    const shouldAbortOnVisibility = !location.pathname.startsWith('/admin');
+    const isAdminRoute =
+      location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
+    const shouldAbortOnVisibility = !isAdminRoute;
     let didAbortFromVisibility = false;
     let didAbortNotify = false;
 
