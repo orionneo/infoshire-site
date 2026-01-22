@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { safeLocalStorage, safeStorage } from '@/utils/safeStorage';
 
 /**
  * Hook para prevenir perda de estado quando o app é minimizado no mobile
@@ -15,13 +16,13 @@ export function usePreventStateLoss<T>(
     if (!enabled) return;
 
     // Tentar restaurar estado salvo ao montar o componente
-    const savedState = sessionStorage.getItem(`state_${key}`);
+    const savedState = safeStorage.getItem(`state_${key}`);
     if (savedState) {
       try {
         const parsed = JSON.parse(savedState);
         setState(parsed);
         // Limpar após restaurar
-        sessionStorage.removeItem(`state_${key}`);
+        safeStorage.removeItem(`state_${key}`);
       } catch (error) {
         console.error('Erro ao restaurar estado:', error);
       }
@@ -32,7 +33,7 @@ export function usePreventStateLoss<T>(
       if (document.hidden) {
         // Página está sendo minimizada/escondida
         try {
-          sessionStorage.setItem(`state_${key}`, JSON.stringify(state));
+          safeStorage.setItem(`state_${key}`, JSON.stringify(state));
         } catch (error) {
           console.error('Erro ao salvar estado:', error);
         }
@@ -42,7 +43,7 @@ export function usePreventStateLoss<T>(
     // Salvar estado antes da página ser descarregada
     const handleBeforeUnload = () => {
       try {
-        sessionStorage.setItem(`state_${key}`, JSON.stringify(state));
+        safeStorage.setItem(`state_${key}`, JSON.stringify(state));
       } catch (error) {
         console.error('Erro ao salvar estado:', error);
       }
@@ -71,7 +72,7 @@ export function useFormPersistence<T extends Record<string, any>>(
   // Tentar carregar valores salvos
   const getSavedValues = (): T => {
     try {
-      const saved = localStorage.getItem(storageKey);
+      const saved = safeLocalStorage.getItem(storageKey);
       if (saved) {
         return { ...defaultValues, ...JSON.parse(saved) };
       }
@@ -84,7 +85,7 @@ export function useFormPersistence<T extends Record<string, any>>(
   // Salvar valores
   const saveValues = (values: T) => {
     try {
-      localStorage.setItem(storageKey, JSON.stringify(values));
+      safeLocalStorage.setItem(storageKey, JSON.stringify(values));
     } catch (error) {
       console.error('Erro ao salvar formulário:', error);
     }
@@ -93,7 +94,7 @@ export function useFormPersistence<T extends Record<string, any>>(
   // Limpar valores salvos
   const clearSavedValues = () => {
     try {
-      localStorage.removeItem(storageKey);
+      safeLocalStorage.removeItem(storageKey);
     } catch (error) {
       console.error('Erro ao limpar formulário salvo:', error);
     }
