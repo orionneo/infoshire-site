@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Loader2, Plus, Search, Trash2, UserPlus, X, ChevronDown, ChevronUp } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
@@ -40,6 +40,7 @@ import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types
 // Chave para salvar o rascunho do formulário
 const FORM_DRAFT_KEY = 'admin_order_form_draft';
 const PENDING_CONFIRMATION_KEY = 'admin_order_pending_confirmation';
+const CREATE_WATCHDOG_MS = 20000;
 type OrderDraft = Record<string, any>;
 type CreatingSession = {
   orderNumber: string;
@@ -75,6 +76,7 @@ export default function AdminOrders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [tabStorageEnabled, setTabStorageEnabled] = useState(!secureTabStorage.isBlocked());
 
   // Ler filtros da URL ao carregar
   useEffect(() => {
@@ -87,6 +89,7 @@ export default function AdminOrders() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [isCreatingStale, setIsCreatingStale] = useState(false);
   const [isNewClient, setIsNewClient] = useState(false);
   const [hasMultipleItems, setHasMultipleItems] = useState(false);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
@@ -101,6 +104,51 @@ export default function AdminOrders() {
   >([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [pendingOrderData, setPendingOrderData] = useState<any>(null);
+  const isCreatingStale = useMemo(
+    () => creatingSessionRef.current && Date.now() - creatingSessionRef.current.startedAt > 25000,
+    [creating]
+  );
+
+  useEffect(() => {
+    if (!isCreatingStale) return;
+    setCreating(false);
+    creatingSessionRef.current = null;
+  }, [isCreatingStale]);
+
+  const saveTabStorageItem = useCallback((key: string, value: string) => {
+    try {
+      const stored = secureTabStorage.setItem(key, value);
+      if (!stored) {
+        setTabStorageEnabled(false);
+        return false;
+      }
+      return true;
+    } catch (error) {
+      console.warn(`Erro ao salvar "${key}" no storage de aba.`, error);
+      setTabStorageEnabled(false);
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showConfirmation || !creating) {
+      setIsCreatingStale(false);
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      const session = creatingSessionRef.current;
+      if (!session || session.resolved) {
+        setIsCreatingStale(false);
+        return;
+      }
+
+      const elapsed = Date.now() - session.startedAt;
+      setIsCreatingStale(elapsed > CREATE_WATCHDOG_MS);
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [creating, showConfirmation]);
 
   useEffect(() => {
     if (!showConfirmation) return;
@@ -191,14 +239,14 @@ export default function AdminOrders() {
 
   // Auto-salvar formulário a cada mudança
   useEffect(() => {
-    if (!dialogOpen) return;
+    if (!dialogOpen || !tabStorageEnabled) return;
 
     const subscription = form.watch((values) => {
-      secureTabStorage.setItem(FORM_DRAFT_KEY, JSON.stringify(values));
+      saveTabStorageItem(FORM_DRAFT_KEY, JSON.stringify(values));
     });
 
     return () => subscription.unsubscribe();
-  }, [dialogOpen, form]);
+  }, [dialogOpen, form, saveTabStorageItem, tabStorageEnabled]);
 
   const loadData = useCallback(async () => {
     try {
@@ -572,12 +620,19 @@ export default function AdminOrders() {
     // Todas as validações passaram - mostrar confirmação
     setPendingOrderData(data);
     pendingOrderRef.current = data;
-    secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
-    secureTabStorage.setItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
+    if (!saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data))) {
+      return;
+    }
+    saveTabStorageItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
     setShowConfirmation(true);
   };
 
   const handleConfirmOrder = async () => {
+    if (creating && isCreatingStale) {
+      setCreating(false);
+      creatingSessionRef.current = null;
+    }
+
     const data = pendingOrderRef.current ?? readDraftFromStorage();
 
     if (!data) {
@@ -593,6 +648,7 @@ export default function AdminOrders() {
     setPendingOrderData(data);
     pendingOrderRef.current = data;
 
+    if (document.visibilityState !== 'visible') return;
     const hasFreshSession = await ensureFreshSession();
     if (!hasFreshSession) {
       toast({
@@ -608,7 +664,7 @@ export default function AdminOrders() {
     setCreating(true);
     const orderNumber = generateOrderNumber();
     const snapshot = { ...data, order_number: orderNumber };
-    secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(snapshot));
+    saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(snapshot));
     creatingSessionRef.current = {
       orderNumber,
       startedAt,
@@ -642,7 +698,6 @@ export default function AdminOrders() {
     }
 
     // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
-    const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
     const watchdog = window.setTimeout(() => {
       if (creatingSessionRef.current?.resolved) {
         return;
@@ -662,7 +717,7 @@ export default function AdminOrders() {
       });
       // ✅ 3) tenta recarregar lista sem bloquear nada
       void loadData().catch((e) => console.warn('[OS]', opId, 'WATCHDOG loadData failed', e));
-    }, WATCHDOG_MS);
+    }, CREATE_WATCHDOG_MS);
 
     try {
       let clientId = data.client_id;
@@ -786,7 +841,7 @@ export default function AdminOrders() {
 
       if (!recovered) {
         // mantém rascunho do form (não apaga)
-        secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
       if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError' && !creatingSessionRef.current?.resolved) {
         finalizeCreationError(
@@ -812,7 +867,7 @@ export default function AdminOrders() {
           variant: 'destructive',
         });
         // mantém rascunho do form (não apaga)
-        secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
       if (creatingSessionRef.current?.opId === opId) {
         creatingSessionRef.current = null;
@@ -1452,6 +1507,8 @@ export default function AdminOrders() {
         onConfirm={handleConfirmOrder}
         onCancel={handleConfirmationCancel}
         loading={creating}
+        forceEnabled={isCreatingStale}
+        loading={creating && !isCreatingStale}
       />
     </AdminLayout>
   );
