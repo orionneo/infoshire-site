@@ -370,24 +370,63 @@ const handleConfirmOrder = async () => {
 
 
 
-  const order = await createServiceOrder(
-  {
-    client_id: clientId,
-    entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
-    equipment: data.equipment,
-    serial_number: data.serial_number,
-    problem_description: data.problem_description,
-    has_multiple_items: hasMultipleItems,
-    items: hasMultipleItems
-      ? additionalItems.map((it) => ({
-          equipment: it.equipment,
-          serial_number: it.serial_number || undefined,
-          description: it.description || undefined,
-        }))
-      : undefined,
-  },
-  { allowOfflineQueue: false, timeoutMs: 20000 } // ✅ ADMIN: sem "sincronizando"
-);
+  // ✅ Criação de OS precisa ser "fail-fast" no admin.
+  // Em PWA/mobile, ao trocar de aba a rede pode pausar e a Promise pode ficar pendurada.
+  // Então: (1) timeout do Supabase (15s) + (2) hard-timeout baseado em relógio real, validado ao voltar para a aba.
+  const HARD_TIMEOUT_MS = 20000;
+  const startedAt = Date.now();
+
+  const op = createServiceOrder(
+    {
+      client_id: clientId,
+      entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
+      equipment: data.equipment,
+      serial_number: data.serial_number,
+      problem_description: data.problem_description,
+      has_multiple_items: hasMultipleItems,
+      items: hasMultipleItems
+        ? additionalItems.map((it) => ({
+            equipment: it.equipment,
+            serial_number: it.serial_number || undefined,
+            description: it.description || undefined,
+          }))
+        : undefined,
+    },
+    { allowOfflineQueue: false, timeoutMs: 15000 } // ✅ 15s é o máximo aceitável para UX no admin
+  );
+
+  const hardTimeout = new Promise<never>((_, reject) => {
+    const check = () => {
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= HARD_TIMEOUT_MS) {
+        reject(new Error('Criação da OS demorou demais (timeout). Se a OS tiver sido criada, ela aparecerá na lista ao recarregar.'));
+        return;
+      }
+      // timers podem ser throttled em background; então só checamos enquanto VISÍVEL
+      if (document.visibilityState === 'visible') setTimeout(check, 500);
+    };
+
+    // ao voltar para a aba, revalida imediatamente
+    const onVis = () => {
+      if (document.visibilityState === 'visible') {
+        const elapsed = Date.now() - startedAt;
+        if (elapsed >= HARD_TIMEOUT_MS) reject(new Error('Criação da OS pausou ao trocar de aba (timeout). Recarregue a lista para verificar se foi criada.'));
+        else setTimeout(check, 0);
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVis, { once: true });
+    setTimeout(check, 500);
+  });
+
+  let order: any;
+  try {
+    order = await Promise.race([op, hardTimeout]);
+  } catch (e) {
+    // tentativa de "auto-heal": recarrega lista, porque a OS pode ter sido criada no backend
+    try { await loadData(); } catch {}
+    throw e;
+  }
 
 
     // ✅ Upload de imagens: não “quebra” a criação se falhar upload
