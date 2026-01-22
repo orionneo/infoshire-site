@@ -414,6 +414,27 @@ useEffect(() => {
     const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const startedAt = Date.now();
     setCreating(true);
+    const orderNumber = generateOrderNumber();
+    const abortController = new AbortController();
+    let didAbortFromVisibility = false;
+    let didAbortNotify = false;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && !abortController.signal.aborted) {
+        didAbortFromVisibility = true;
+        abortController.abort();
+      }
+    };
+
+    const handlePageHide = () => {
+      if (!abortController.signal.aborted) {
+        didAbortFromVisibility = true;
+        abortController.abort();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('pagehide', handlePageHide);
 
     // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
     const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
