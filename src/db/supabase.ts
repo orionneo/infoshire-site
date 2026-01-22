@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { toast } from '@/hooks/use-toast';
 
 /**
  * ✅ SUPABASE CLIENT (definitive stability patch)
@@ -48,23 +49,93 @@ const memoryStorage = (() => {
   };
 })();
 
+const STORAGE_CHOICE_KEY = '__supabase_storage_choice__';
+let hasWarnedMemoryFallback = false;
+
+const warnMemoryFallback = (error?: unknown) => {
+  if (hasWarnedMemoryFallback) return;
+  hasWarnedMemoryFallback = true;
+
+  console.warn(
+    '⚠️ Supabase auth storage unavailable. Falling back to in-memory storage (sessions will not persist across reloads).',
+    error
+  );
+
+  if (typeof window === 'undefined') return;
+
+  const isAdminRoute = window.location?.pathname?.includes('admin');
+  if (!isAdminRoute) return;
+
+  try {
+    toast({
+      title: 'Sessão do admin pode não persistir',
+      description:
+        'O navegador bloqueou o armazenamento local. A sessão será mantida apenas em memória até recarregar a página.',
+      variant: 'destructive',
+    });
+  } catch (toastError) {
+    console.warn('⚠️ Falha ao exibir aviso visual de storage em memória.', toastError);
+  }
+};
+
+const canUseStorage = (storage: Storage) => {
+  try {
+    const testKey = '__supabase_storage_test__';
+    storage.setItem(testKey, testKey);
+    storage.removeItem(testKey);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const resolveSupabaseStorage = () => {
   if (typeof window === 'undefined') {
     return memoryStorage;
   }
 
-  try {
-    const testKey = '__supabase_storage_test__';
-    window.localStorage.setItem(testKey, testKey);
-    window.localStorage.removeItem(testKey);
-    return window.localStorage;
-  } catch (error) {
-    console.warn(
-      '⚠️ Supabase auth storage unavailable. Falling back to in-memory storage (sessions will not persist across reloads).',
-      error
-    );
-    return memoryStorage;
+  const sessionAvailable = canUseStorage(window.sessionStorage);
+  const localAvailable = canUseStorage(window.localStorage);
+
+  let storedChoice: string | null = null;
+  if (sessionAvailable) {
+    try {
+      storedChoice = window.sessionStorage.getItem(STORAGE_CHOICE_KEY);
+    } catch (error) {
+      console.warn('⚠️ Falha ao ler escolha de storage do sessionStorage.', error);
+    }
   }
+
+  if (storedChoice === 'session' && sessionAvailable) {
+    return window.sessionStorage;
+  }
+
+  if (storedChoice === 'local' && localAvailable) {
+    return window.localStorage;
+  }
+
+  if (localAvailable) {
+    if (sessionAvailable) {
+      try {
+        window.sessionStorage.setItem(STORAGE_CHOICE_KEY, 'local');
+      } catch (error) {
+        console.warn('⚠️ Falha ao salvar escolha de storage local no sessionStorage.', error);
+      }
+    }
+    return window.localStorage;
+  }
+
+  if (sessionAvailable) {
+    try {
+      window.sessionStorage.setItem(STORAGE_CHOICE_KEY, 'session');
+    } catch (error) {
+      console.warn('⚠️ Falha ao salvar escolha de storage sessão no sessionStorage.', error);
+    }
+    return window.sessionStorage;
+  }
+
+  warnMemoryFallback();
+  return memoryStorage;
 };
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
