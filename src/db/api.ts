@@ -51,19 +51,60 @@ function handleApiError(error: any, context: string): never {
 // ⏱️ Timeout helper (evita "loading infinito" no PWA)
 // Aceita PromiseLike porque Supabase PostgrestBuilder é "thenable"
 // ================================
-async function withTimeout<T>(promiseLike: PromiseLike<T>, ms: number, label: string): Promise<T> {
-  let t: any;
-  const timeout = new Promise<T>((_, reject) => {
-    t = setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms);
-  });
 
-  try {
-    // Promise.resolve normaliza builders do Supabase (PromiseLike)
-    return await Promise.race([Promise.resolve(promiseLike), timeout]);
-  } finally {
-    clearTimeout(t);
-  }
+function withTimeoutVisAware<T>(promiseLike: PromiseLike<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const start = Date.now();
+    let settled = false;
+    let t: any;
+
+    const cleanup = () => {
+      settled = true;
+      clearTimeout(t);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+
+    const fail = (suffix?: string) => {
+      const elapsed = Date.now() - start;
+      cleanup();
+      reject(new Error(`${label} timeout after ${ms}ms${suffix ? ` (${suffix})` : ''}. elapsed=${elapsed}ms`));
+    };
+
+    const onVis = () => {
+      // Quando voltar para a aba, checa tempo real decorrido
+      if (document.visibilityState === 'visible') {
+        const elapsed = Date.now() - start;
+        if (!settled && elapsed > ms) fail('backgrounded');
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVis);
+
+    // Timer normal (funciona quando aba está ativa)
+    t = setTimeout(() => {
+      if (!settled) fail('active');
+    }, ms);
+
+    Promise.resolve(promiseLike).then(
+      (v) => {
+        if (settled) return;
+        cleanup();
+        resolve(v);
+      },
+      (e) => {
+        if (settled) return;
+        cleanup();
+        reject(e);
+      }
+    );
+  });
 }
+
+function isTimeoutError(e: any): boolean {
+  const msg = String(e?.message || '').toLowerCase();
+  return msg.includes('timeout after');
+}
+
 
 // Profiles
 export async function getAllProfiles(): Promise<Profile[]> {
@@ -225,11 +266,9 @@ export async function createServiceOrder(
 ): Promise<ServiceOrder> {
   const timeoutMs = options.timeoutMs ?? 15000;
 
-  // ✅ Exigir sessão: evita POST sem JWT (vira 401/RLS e fica "travando")
+  // ✅ Exigir sessão: evita POST sem JWT (vira 401/RLS e pode ficar "travando")
   const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-  if (sessionErr) {
-    throw sessionErr;
-  }
+  if (sessionErr) throw sessionErr;
   if (!sessionData.session?.user) {
     throw new Error('Sessão expirada. Faça login novamente.');
   }
@@ -266,17 +305,59 @@ export async function createServiceOrder(
     has_multiple_items: order.has_multiple_items ?? false,
   };
 
-  const inserted = await withTimeout(
-    supabase
-      .from('service_orders')
-      .insert(payload)
-      .select()
-      .single(),
-    timeoutMs,
-    'create_service_order timeout'
-  );
+  const isUniqueViolation = (e: any): boolean => {
+    const code = String(e?.code || '');
+    const msg = String(e?.message || '').toLowerCase();
+    const details = String(e?.details || '').toLowerCase();
+    return code === '23505' || msg.includes('duplicate') || details.includes('duplicate');
+  };
 
-  if (inserted.error) throw inserted.error;
+  const tryInsert = async () => {
+    const res = await withTimeoutVisAware(
+      supabase.from('service_orders').insert(payload).select().single(),
+      timeoutMs,
+      'create_service_order'
+    );
+    return res;
+  };
+
+  const fetchByOrderNumber = async () => {
+    const check = await supabase
+      .from('service_orders')
+      .select('*')
+      .eq('order_number', order_number)
+      .maybeSingle();
+
+    if (check.error) {
+      // eslint-disable-next-line no-console
+      console.warn('Fallback fetchByOrderNumber failed:', check.error);
+      return null;
+    }
+    return (check.data ?? null) as ServiceOrder | null;
+  };
+
+  let inserted: any;
+
+  try {
+    inserted = await tryInsert();
+  } catch (e: any) {
+    // 1) Se timeout (aba em background) OU conflito (23505), pode ter criado no backend
+    if (isTimeoutError(e) || isUniqueViolation(e)) {
+      const existing = await fetchByOrderNumber();
+      if (existing) return existing;
+
+      // 2) Se for timeout e ainda não existe, tenta inserir mais 1 vez
+      if (isTimeoutError(e)) {
+        inserted = await tryInsert();
+      } else {
+        throw e;
+      }
+    } else {
+      throw e;
+    }
+  }
+
+  if (inserted?.error) throw inserted.error;
   const created = inserted.data as ServiceOrder;
 
   // Itens (opcional)
@@ -288,21 +369,19 @@ export async function createServiceOrder(
       description: it.description ?? null,
     }));
 
-    const itemsRes = await withTimeout(
+    const itemsRes = await withTimeoutVisAware(
       supabase.from('service_order_items').insert(itemsPayload),
       timeoutMs,
-      'create_service_order_items timeout'
+      'create_service_order_items'
     );
     if (itemsRes.error) throw itemsRes.error;
   }
 
-  // Histórico inicial (opcional)
-  // Observação: se sua RLS bloquear, ajuste as policies (ver SQL do fix).
-  // Histórico inicial (opcional)
-  // ⚠️ Importante: em PWA/mobile, trocar de aba pode pausar requests.
+  // Histórico inicial (best effort)
+  // ⚠️ Em PWA/mobile, trocar de aba pode pausar requests.
   // Então este passo NÃO pode travar a criação da OS.
   try {
-    const historyRes = await withTimeout(
+    const historyRes = await withTimeoutVisAware(
       supabase.from('order_status_history').insert({
         order_id: created.id,
         status: 'received',
@@ -310,12 +389,13 @@ export async function createServiceOrder(
         created_by: sessionData.session.user.id,
       }),
       5000,
-      'create_order_status_history timeout'
+      'create_order_status_history'
     );
 
-    // Se não der permissão para histórico, não travamos a criação da OS:
-    // eslint-disable-next-line no-console
-    if ((historyRes as any)?.error) console.warn('Falha ao criar histórico inicial:', (historyRes as any).error);
+    if ((historyRes as any)?.error) {
+      // eslint-disable-next-line no-console
+      console.warn('Falha ao criar histórico inicial:', (historyRes as any).error);
+    }
   } catch (e) {
     // eslint-disable-next-line no-console
     console.warn('Histórico inicial não foi gravado (ignorado):', e);
@@ -911,7 +991,7 @@ export async function uploadOrderImage(
   const bucket = getOrderImagesBucket();
 
   try {
-    const { data: uploadData, error: uploadError } = await withTimeout(
+    const { data: uploadData, error: uploadError } = await withTimeoutVisAware(
       supabase.storage.from(bucket).upload(filePath, compressedFile, {
         cacheControl: '3600',
         upsert: false,
@@ -925,7 +1005,7 @@ export async function uploadOrderImage(
     const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(uploadData.path);
     const imageUrl = urlData.publicUrl;
 
-    const { data: userRes, error: userErr } = await withTimeout(
+    const { data: userRes, error: userErr } = await withTimeoutVisAware(
       supabase.auth.getUser(),
       15000,
       'auth.getUser(order_image)'
@@ -933,7 +1013,7 @@ export async function uploadOrderImage(
     if (userErr) throw userErr;
     if (!userRes.user) throw new Error('Usuário não autenticado');
 
-    const { data, error } = await withTimeout(
+    const { data, error } = await withTimeoutVisAware(
       supabase
         .from('order_images')
         .insert({
