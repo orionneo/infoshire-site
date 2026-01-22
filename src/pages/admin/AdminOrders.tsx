@@ -356,6 +356,8 @@ const handleConfirmOrder = async () => {
 
   const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   const startedAt = Date.now();
+  const abortController = new AbortController();
+  let didAbortFromVisibility = false;
 
   setCreating(true);
 
@@ -380,6 +382,26 @@ const handleConfirmOrder = async () => {
       });
     }
   }, WATCHDOG_MS);
+
+  const onVisibilityAbort = (reason: 'visibilitychange' | 'pagehide') => {
+    if (abortController.signal.aborted) return;
+    didAbortFromVisibility = true;
+    console.error(`[OS] ${opId} abortado (${reason})`);
+    abortController.abort();
+  };
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'hidden') {
+      onVisibilityAbort('visibilitychange');
+    }
+  };
+
+  const handlePageHide = () => {
+    onVisibilityAbort('pagehide');
+  };
+
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('pagehide', handlePageHide);
 
   try {
     let clientId = data.client_id;
@@ -411,7 +433,7 @@ const handleConfirmOrder = async () => {
           : undefined,
       },
       // ✅ ADMIN: timeout curto + vis-aware (NÃO 60s)
-      { allowOfflineQueue: false, timeoutMs: 15000 }
+      { allowOfflineQueue: false, timeoutMs: 15000, abortController }
     );
 
     // ✅ Upload de imagens: não “quebra” a criação se falhar upload
@@ -449,20 +471,32 @@ const handleConfirmOrder = async () => {
   } catch (err: any) {
     console.error('❌ Falha ao criar OS:', err);
 
-    toast({
-      title: 'Erro ao criar OS',
-      description:
-        err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
-          ? 'Sem conexão no momento. Verifique internet e tente novamente.'
-          : err?.message || 'Falha inesperada ao criar a OS.',
-      variant: 'destructive',
-    });
+    if (!didAbortFromVisibility && err?.name !== 'AbortError') {
+      toast({
+        title: 'Erro ao criar OS',
+        description:
+          err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
+            ? 'Sem conexão no momento. Verifique internet e tente novamente.'
+            : err?.message || 'Falha inesperada ao criar a OS.',
+        variant: 'destructive',
+      });
+    }
 
     // mantém rascunho do form (não apaga)
     sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
   } finally {
     clearTimeout(watchdog);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('pagehide', handlePageHide);
     setCreating(false);
+    if (didAbortFromVisibility) {
+      toast({
+        title: 'Criação interrompida em background',
+        description:
+          'A aba foi para segundo plano e a requisição foi cancelada. Verifique a lista de OS; se necessário, tente novamente.',
+        variant: 'destructive',
+      });
+    }
   }
 };
 

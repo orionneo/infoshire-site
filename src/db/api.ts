@@ -13,7 +13,8 @@ import type {
   ServiceOrderWithClient,
   SiteSetting,
 } from '@/types/types';
-import { supabase } from './supabase';
+import { createClient } from '@supabase/supabase-js';
+import { supabase, supabaseAnonKey, supabaseUrl } from './supabase';
 import { getOrderImagesBucket } from '@/db/storage';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -228,6 +229,25 @@ export interface CreateServiceOrderOptions {
   allowOfflineQueue?: boolean;
   /** timeout em ms para operações críticas */
   timeoutMs?: number;
+  /**
+   * Controller opcional para abortar a criação (ex: aba escondida/pagehide).
+   * Se não for fornecido, o fluxo cria um AbortController interno.
+   */
+  abortController?: AbortController;
+}
+
+function createAbortableSupabaseClient(signal: AbortSignal, accessToken?: string) {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+    global: {
+      fetch: (input, init = {}) => fetch(input, { ...init, signal }),
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+    },
+  });
 }
 
 /**
@@ -294,11 +314,17 @@ export async function createServiceOrder(
   options: CreateServiceOrderOptions = {}
 ): Promise<ServiceOrder> {
   const timeoutMs = options.timeoutMs ?? 15000;
+  const abortController = options.abortController ?? new AbortController();
+  const abortSignal = abortController.signal;
 
   // ✅ Exigir sessão: evita POST sem JWT
   const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
   if (sessionErr) throw sessionErr;
   if (!sessionData.session?.user) throw new Error('Sessão expirada. Faça login novamente.');
+  const supabaseWithSignal = createAbortableSupabaseClient(
+    abortSignal,
+    sessionData.session.access_token
+  );
 
   // ✅ Admin deve criar online
   if (!navigator.onLine) {
@@ -332,17 +358,26 @@ export async function createServiceOrder(
     has_multiple_items: order.has_multiple_items ?? false,
   };
 
+  /**
+   * ✅ Fluxo esperado:
+   * - Cria um AbortController para cancelar requests se a aba ficar hidden/pagehide.
+   * - Se o Abort for disparado (ex: usuário sai da aba), a criação encerra imediatamente
+   *   e a camada de UI é responsável por exibir um toast de fallback e liberar o loading.
+   */
   // ✅ 1) Cria a OS com timeout (não pode travar)
   let inserted: any;
   try {
     inserted = await withTimeoutVisAware(
-      supabase.from('service_orders').insert(payload).select().single(),
+      supabaseWithSignal.from('service_orders').insert(payload).select().single(),
       timeoutMs,
       'create_service_order timeout'
     );
   } catch (e: any) {
+    if (abortSignal.aborted) {
+      throw e;
+    }
     // Se timeout: pode ter criado no backend e o browser "dormiu"
-    const check = await supabase
+    const check = await supabaseWithSignal
       .from('service_orders')
       .select('*')
       .eq('order_number', order_number)
@@ -365,7 +400,7 @@ export async function createServiceOrder(
     }));
 
     const itemsRes = await withTimeoutVisAware(
-      supabase.from('service_order_items').insert(itemsPayload),
+      supabaseWithSignal.from('service_order_items').insert(itemsPayload),
       timeoutMs,
       'create_service_order_items timeout'
     );
@@ -378,7 +413,7 @@ export async function createServiceOrder(
   try {
     if (document.visibilityState === 'visible') {
       const historyRes = await withTimeoutVisAware(
-        supabase.from('order_status_history').insert({
+        supabaseWithSignal.from('order_status_history').insert({
           order_id: created.id,
           status: 'received',
           notes: 'Ordem de serviço criada',
