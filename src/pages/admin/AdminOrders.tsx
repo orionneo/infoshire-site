@@ -453,26 +453,6 @@ export default function AdminOrders() {
       void loadData().catch((e) => console.warn('[OS]', opId, 'WATCHDOG loadData failed', e));
     }, WATCHDOG_MS);
 
-    const orderNumber = generateOrderNumber();
-    let didAbortFromVisibility = false;
-    let didAbortNotify = false;
-    const abortController = new AbortController();
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        didAbortFromVisibility = true;
-        abortController.abort();
-      }
-    };
-
-    const handlePageHide = () => {
-      didAbortFromVisibility = true;
-      abortController.abort();
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('pagehide', handlePageHide);
-
     try {
       let clientId = data.client_id;
 
