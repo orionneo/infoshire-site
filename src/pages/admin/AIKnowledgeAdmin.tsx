@@ -553,7 +553,6 @@ export default function AIKnowledgeAdmin() {
                   placeholder="Ex: Notebook, Smartphone, Desktop..."
                   value={caseForm.equipment_type}
                   onChange={(e) => handleEquipmentChange(e.target.value)}
-                  onBlur={() => setTimeout(() => setShowEquipmentSuggestions(false), 200)}
                 />
                 {showEquipmentSuggestions && equipmentSuggestions.length > 0 && (
                   <div className="absolute z-10 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-48 overflow-auto">
@@ -582,7 +581,6 @@ export default function AIKnowledgeAdmin() {
                     placeholder="Ex: Dell, Samsung, Apple..."
                     value={caseForm.brand}
                     onChange={(e) => handleBrandChange(e.target.value)}
-                    onBlur={() => setTimeout(() => setShowBrandSuggestions(false), 200)}
                   />
                   {showBrandSuggestions && brandSuggestions.length > 0 && (
                     <div className="absolute z-10 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-48 overflow-auto">
@@ -674,7 +672,6 @@ export default function AIKnowledgeAdmin() {
                         addTag(tagInput);
                       }
                     }}
-                    onBlur={() => setTimeout(() => setShowTagSuggestions(false), 200)}
                   />
                   {showTagSuggestions && tagSuggestions.length > 0 && (
                     <div className="absolute z-10 w-full mt-1 bg-popover border rounded-md shadow-lg max-h-48 overflow-auto">

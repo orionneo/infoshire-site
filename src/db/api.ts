@@ -13,8 +13,7 @@ import type {
   ServiceOrderWithClient,
   SiteSetting,
 } from '@/types/types';
-import { createClient } from '@supabase/supabase-js';
-import { supabase, supabaseAnonKey, supabaseUrl } from './supabase';
+import { supabase } from './supabase';
 import { getOrderImagesBucket } from '@/db/storage';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -48,167 +47,6 @@ function handleApiError(error: any, context: string): never {
 }
 
 
-// ================================
-// ⏱️ Timeout helper (evita "loading infinito" no PWA)
-// Aceita PromiseLike porque Supabase PostgrestBuilder é "thenable"
-// ================================
-
-function withTimeoutVisAware<T>(
-  promiseLike: PromiseLike<T>,
-  ms: number,
-  label: string,
-  abortSignal?: AbortSignal
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const start = Date.now();
-    let settled = false;
-    let t: ReturnType<typeof setTimeout> | null = null;
-    let backgrounded = false;
-    let abortListener: (() => void) | null = null;
-    let hiddenStartedAt: number | null = document.visibilityState === 'visible' ? null : Date.now();
-    let hiddenDurationMs = 0;
-
-    const cleanup = () => {
-      settled = true;
-      if (t) {
-        clearTimeout(t);
-      }
-      document.removeEventListener('visibilitychange', onVisChange);
-      window.removeEventListener('pageshow', onPageShow);
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('pagehide', onPageHide);
-      document.removeEventListener('freeze', onFreeze);
-      document.removeEventListener('resume', onResume as EventListener);
-      if (abortSignal && abortListener) {
-        abortSignal.removeEventListener('abort', abortListener);
-      }
-    };
-
-    const getHiddenDuration = () =>
-      hiddenDurationMs + (hiddenStartedAt ? Date.now() - hiddenStartedAt : 0);
-
-    const getElapsedVisible = () => Date.now() - start - getHiddenDuration();
-
-    const fail = (suffix?: string) => {
-      const elapsed = Date.now() - start;
-      cleanup();
-      reject(new Error(`${label} timeout after ${ms}ms${suffix ? ` (${suffix})` : ''}. elapsed=${elapsed}ms`));
-    };
-
-    const checkElapsed = (source: string) => {
-      const elapsed = getElapsedVisible();
-      if (!settled && elapsed > ms) {
-        fail(source);
-        return true;
-      }
-      return false;
-    };
-
-    const onReturn = (source: string) => {
-      if (document.visibilityState === 'visible') {
-        checkElapsed(source);
-      }
-    };
-
-    const onVisChange = () => {
-      if (document.visibilityState === 'visible') {
-        if (hiddenStartedAt) {
-          hiddenDurationMs += Date.now() - hiddenStartedAt;
-          hiddenStartedAt = null;
-        }
-        onReturn('visibility');
-      } else {
-        backgrounded = true;
-        if (!hiddenStartedAt) {
-          hiddenStartedAt = Date.now();
-        }
-      }
-    };
-
-    const onPageShow = () => onReturn('pageshow');
-    const onFocus = () => onReturn('focus');
-    const onPageHide = () => {
-      backgrounded = true;
-      if (!hiddenStartedAt) {
-        hiddenStartedAt = Date.now();
-      }
-    };
-    const onFreeze = () => {
-      backgrounded = true;
-      if (!hiddenStartedAt) {
-        hiddenStartedAt = Date.now();
-      }
-    };
-    const onResume = () => {
-      if (backgrounded) {
-        onReturn('resume');
-        backgrounded = false;
-        if (hiddenStartedAt) {
-          hiddenDurationMs += Date.now() - hiddenStartedAt;
-          hiddenStartedAt = null;
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', onVisChange);
-    window.addEventListener('pageshow', onPageShow);
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('pagehide', onPageHide);
-    document.addEventListener('freeze', onFreeze);
-    document.addEventListener('resume', onResume as EventListener);
-
-    if (abortSignal) {
-      if (abortSignal.aborted) {
-        cleanup();
-        reject(new DOMException('Aborted', 'AbortError'));
-        return;
-      }
-      abortListener = () => {
-        if (settled) return;
-        cleanup();
-        reject(new DOMException('Aborted', 'AbortError'));
-      };
-      abortSignal.addEventListener('abort', abortListener);
-    }
-
-    const scheduleTimeout = () => {
-      if (settled) return;
-      const remainingMs = ms - getElapsedVisible();
-      if (remainingMs <= 0) {
-        fail('active');
-        return;
-      }
-      if (t) {
-        clearTimeout(t);
-      }
-      t = setTimeout(() => {
-        if (settled) return;
-        scheduleTimeout();
-      }, Math.min(Math.max(remainingMs, 250), 1000));
-    };
-
-    // Timer normal (funciona quando aba está ativa)
-    scheduleTimeout();
-
-    Promise.resolve(promiseLike).then(
-      (v) => {
-        if (settled) return;
-        cleanup();
-        resolve(v);
-      },
-      (e) => {
-        if (settled) return;
-        cleanup();
-        reject(e);
-      }
-    );
-  });
-}
-
-function isTimeoutError(e: any): boolean {
-  const msg = String(e?.message || '').toLowerCase();
-  return msg.includes('timeout after');
-}
 
 
 // Profiles
@@ -262,48 +100,28 @@ export async function createClientProfile(clientData: {
   name: string;
   phone: string;
   password: string;
-  timeoutMs?: number;
-  abortSignal?: AbortSignal;
 }): Promise<Profile> {
-  const defaultTimeoutMs = 15000;
-  const timeoutMs = Math.max(clientData.timeoutMs ?? defaultTimeoutMs, defaultTimeoutMs);
-  const abortSignal = clientData.abortSignal;
-
-  if (abortSignal?.aborted) {
-    throw new DOMException('Aborted', 'AbortError');
-  }
-
   // Create auth user
-  const { data: authData, error: authError } = await withTimeoutVisAware(
-    supabase.auth.signUp({
-      email: clientData.email,
-      password: clientData.password,
-      options: {
-        data: {
-          name: clientData.name,
-          phone: clientData.phone,
-        },
+  const { data: authData, error: authError } = await supabase.auth.signUp({
+    email: clientData.email,
+    password: clientData.password,
+    options: {
+      data: {
+        name: clientData.name,
+        phone: clientData.phone,
       },
-    }),
-    timeoutMs,
-    'createClientProfile.signUp',
-    abortSignal
-  );
+    },
+  });
 
   if (authError) throw authError;
   if (!authData.user) throw new Error('Falha ao criar usuário');
 
   // Get the created profile
-  const { data: profile, error: profileError } = await withTimeoutVisAware(
-    supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', authData.user.id)
-      .maybeSingle(),
-    timeoutMs,
-    'createClientProfile.profile',
-    abortSignal
-  );
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', authData.user.id)
+    .maybeSingle();
 
   if (profileError) throw profileError;
   if (!profile) throw new Error('Perfil não encontrado');
@@ -345,35 +163,6 @@ export async function getServiceOrder(id: string): Promise<ServiceOrderWithClien
   return data;
 }
 
-export interface CreateServiceOrderOptions {
-  /**
-   * Mantém compatibilidade com o resto do app, mas por padrão o ADMIN NÃO cria OS offline.
-   * Se true, e a criação falhar por rede, você poderá enfileirar manualmente em outra camada.
-   */
-  allowOfflineQueue?: boolean;
-  /** timeout em ms para operações críticas */
-  timeoutMs?: number;
-  /**
-   * Controller opcional para abortar a criação (ex: aba escondida/pagehide).
-   * Se não for fornecido, o fluxo cria um AbortController interno.
-   */
-  abortController?: AbortController;
-}
-
-function createAbortableSupabaseClient(signal: AbortSignal, accessToken?: string) {
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false,
-    },
-    global: {
-      fetch: (input, init = {}) => fetch(input, { ...init, signal }),
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-    },
-  });
-}
-
 /**
  * Gera um número de OS sem depender de RPC (evita travas/timeouts).
  * Formato: OS-YYYYMMDD-HHMM-XXXX
@@ -389,35 +178,6 @@ export function generateOrderNumber() {
   const rand = Math.floor(1000 + Math.random() * 9000);
   return `OS-${y}${m}${day}-${hh}${mm}-${rand}`;
 }
-
-function withTimeout<T>(promiseLike: PromiseLike<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const start = Date.now();
-    let done = false;
-
-    const t = setTimeout(() => {
-      if (done) return;
-      done = true;
-      reject(new Error(`${label}. timeout after ${ms}ms (elapsed=${Date.now() - start}ms)`));
-    }, ms);
-
-    Promise.resolve(promiseLike).then(
-      (v) => {
-        if (done) return;
-        done = true;
-        clearTimeout(t);
-        resolve(v);
-      },
-      (e) => {
-        if (done) return;
-        done = true;
-        clearTimeout(t);
-        reject(e);
-      }
-    );
-  });
-}
-
 
 export async function createServiceOrder(
   order: {
@@ -435,32 +195,15 @@ export async function createServiceOrder(
       serial_number?: string;
       description?: string;
     }>;
-  },
-  options: CreateServiceOrderOptions = {}
+  }
 ): Promise<ServiceOrder> {
-  const timeoutMs = options.timeoutMs ?? 15000;
-  const abortController = options.abortController ?? new AbortController();
-  const abortSignal = abortController.signal;
-
   // ✅ Exigir sessão: evita POST sem JWT
-  const { data: sessionData, error: sessionErr } = await withTimeoutVisAware(
-    supabase.auth.getSession(),
-    timeoutMs,
-    'create_service_order.getSession',
-    abortSignal
-  );
+  const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
   if (sessionErr) throw sessionErr;
   if (!sessionData.session?.user) throw new Error('Sessão expirada. Faça login novamente.');
-  const supabaseWithSignal = createAbortableSupabaseClient(
-    abortSignal,
-    sessionData.session.access_token
-  );
 
   // ✅ Admin deve criar online
   if (!navigator.onLine) {
-    if (options.allowOfflineQueue) {
-      throw new Error('Sem internet. (offline queue desativada por padrão no admin)');
-    }
     throw new Error('Sem internet. Conecte e tente novamente.');
   }
 
@@ -490,25 +233,15 @@ export async function createServiceOrder(
 
   /**
    * ✅ Fluxo esperado:
-   * - Cria um AbortController para cancelar requests se a aba ficar hidden/pagehide.
-   * - Se o Abort for disparado (ex: usuário sai da aba), a criação encerra imediatamente
-   *   e a camada de UI é responsável por exibir um toast de fallback e liberar o loading.
+   * - Cria a OS online sem cancelamento por lifecycle para evitar travas no Admin.
    */
-  // ✅ 1) Cria a OS com timeout (não pode travar)
+  // ✅ 1) Cria a OS online (não usa cancelamento por lifecycle)
   let inserted: any;
   try {
-    inserted = await withTimeoutVisAware(
-      supabaseWithSignal.from('service_orders').insert(payload).select().single(),
-      timeoutMs,
-      'create_service_order timeout',
-      abortSignal
-    );
+    inserted = await supabase.from('service_orders').insert(payload).select().single();
   } catch (e: any) {
-    if (abortSignal.aborted) {
-      throw e;
-    }
     // Se timeout: pode ter criado no backend e o browser "dormiu"
-    const check = await supabaseWithSignal
+    const check = await supabase
       .from('service_orders')
       .select('*')
       .eq('order_number', order_number)
@@ -530,12 +263,7 @@ export async function createServiceOrder(
       description: it.description ?? null,
     }));
 
-    const itemsRes = await withTimeoutVisAware(
-      supabaseWithSignal.from('service_order_items').insert(itemsPayload),
-      timeoutMs,
-      'create_service_order_items timeout',
-      abortSignal
-    );
+    const itemsRes = await supabase.from('service_order_items').insert(itemsPayload);
     if (itemsRes.error) throw itemsRes.error;
   }
 
@@ -543,24 +271,15 @@ export async function createServiceOrder(
   // - Se aba estiver hidden, nem tenta (PWA pausa requests)
   // - Se der timeout/erro/RLS, só loga e segue
   try {
-    if (document.visibilityState === 'visible') {
-      const historyRes = await withTimeoutVisAware(
-        supabaseWithSignal.from('order_status_history').insert({
-          order_id: created.id,
-          status: 'received',
-          notes: 'Ordem de serviço criada',
-          created_by: sessionData.session.user.id,
-        }),
-        5000,
-        'create_order_status_history timeout',
-        abortSignal
-      );
+    const historyRes = await supabase.from('order_status_history').insert({
+      order_id: created.id,
+      status: 'received',
+      notes: 'Ordem de serviço criada',
+      created_by: sessionData.session.user.id,
+    });
 
-      if ((historyRes as any)?.error) {
-        console.warn('Falha ao criar histórico inicial (ignorado):', (historyRes as any).error);
-      }
-    } else {
-      console.warn('Histórico inicial pulado (aba hidden).');
+    if ((historyRes as any)?.error) {
+      console.warn('Falha ao criar histórico inicial (ignorado):', (historyRes as any).error);
     }
   } catch (e) {
     console.warn('Histórico inicial não foi gravado (ignorado):', e);
@@ -1168,42 +887,30 @@ export async function uploadOrderImage(
   const bucket = getOrderImagesBucket();
 
   try {
-    const { data: uploadData, error: uploadError } = await withTimeoutVisAware(
-      supabase.storage.from(bucket).upload(filePath, compressedFile, {
-        cacheControl: '3600',
-        upsert: false,
-      }),
-      20000,
-      'storage.upload(order_image)'
-    );
+    const { data: uploadData, error: uploadError } = await supabase.storage.from(bucket).upload(filePath, compressedFile, {
+      cacheControl: '3600',
+      upsert: false,
+    });
 
     if (uploadError) throw uploadError;
 
     const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(uploadData.path);
     const imageUrl = urlData.publicUrl;
 
-    const { data: userRes, error: userErr } = await withTimeoutVisAware(
-      supabase.auth.getUser(),
-      15000,
-      'auth.getUser(order_image)'
-    );
+    const { data: userRes, error: userErr } = await supabase.auth.getUser();
     if (userErr) throw userErr;
     if (!userRes.user) throw new Error('Usuário não autenticado');
 
-    const { data, error } = await withTimeoutVisAware(
-      supabase
-        .from('order_images')
-        .insert({
-          order_id: orderId,
-          image_url: imageUrl,
-          description: description || null,
-          uploaded_by: userRes.user.id,
-        })
-        .select()
-        .single(),
-      20000,
-      'insert order_images'
-    );
+    const { data, error } = await supabase
+      .from('order_images')
+      .insert({
+        order_id: orderId,
+        image_url: imageUrl,
+        description: description || null,
+        uploaded_by: userRes.user.id,
+      })
+      .select()
+      .single();
 
     if (error) throw error;
 
