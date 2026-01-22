@@ -37,7 +37,12 @@ import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types
 
 // Chave para salvar o rascunho do formulário
 const FORM_DRAFT_KEY = 'admin_order_form_draft';
-const CREATING_TIMEOUT_MS = 45000;
+type CreatingSession = {
+  orderNumber: string;
+  startedAt: number;
+  opId: string;
+  resolved: boolean;
+};
 
 // Helpers para input type="date" + ISO estável sem bug de timezone
 const toDateInput = (d: Date) => {
@@ -56,7 +61,8 @@ export default function AdminOrders() {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
-  const creatingStartedAtRef = useRef<number | null>(null);
+  const creatingSessionRef = useRef<CreatingSession | null>(null);
+  const resolvingVisibilityRef = useRef(false);
   const [orders, setOrders] = useState<ServiceOrderWithClient[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<ServiceOrderWithClient[]>([]);
   const [clients, setClients] = useState<Profile[]>([]);
@@ -213,39 +219,91 @@ export default function AdminOrders() {
     filterOrders();
   }, [orders, searchTerm, statusFilter]);
 
-  useEffect(() => {
-    if (creating) {
-      creatingStartedAtRef.current = Date.now();
-    } else {
-      creatingStartedAtRef.current = null;
-    }
-  }, [creating]);
+  const resetCreationForm = useCallback(() => {
+    setShowConfirmation(false);
+    setDialogOpen(false);
+    form.reset();
+    setIsNewClient(false);
+    setHasMultipleItems(false);
+    setAdditionalItems([]);
+    setSelectedImages([]);
+    setPendingOrderData(null);
+  }, [form]);
 
-  useEffect(() => {
-    const checkCreatingTimeout = (source: string) => {
-      if (!creating) return;
-      const startedAt = creatingStartedAtRef.current;
-      if (!startedAt) return;
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < CREATING_TIMEOUT_MS) return;
+  const finalizeCreationSuccess = useCallback(
+    async (order: { order_number?: string; id: string }, source: string) => {
+      if (creatingSessionRef.current) {
+        creatingSessionRef.current.resolved = true;
+      }
 
       setCreating(false);
-      loadData();
       toast({
-        title: 'Tempo excedido',
-        description: `A criação da OS ficou ativa por mais de ${Math.round(CREATING_TIMEOUT_MS / 1000)}s (${source}). Tente novamente.`,
+        title: 'Ordem criada',
+        description: `OS ${order.order_number || order.id}${source ? ` (${source})` : ''}`,
+      });
+
+      safeStorage.removeItem(FORM_DRAFT_KEY);
+      safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
+
+      resetCreationForm();
+      await loadData();
+    },
+    [loadData, resetCreationForm, toast]
+  );
+
+  const finalizeCreationError = useCallback(
+    (message: string) => {
+      if (creatingSessionRef.current) {
+        creatingSessionRef.current.resolved = true;
+      }
+
+      setCreating(false);
+      toast({
+        title: 'Erro ao criar OS',
+        description: message,
         variant: 'destructive',
       });
-    };
 
+      if (pendingOrderData) {
+        safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(pendingOrderData));
+      }
+    },
+    [pendingOrderData, toast]
+  );
+
+  const resolveCreationOnVisibility = useCallback(
+    async (source: string) => {
+      if (!creating || resolvingVisibilityRef.current) return;
+      const session = creatingSessionRef.current;
+      if (!session || session.resolved) return;
+
+      resolvingVisibilityRef.current = true;
+      try {
+        const existingOrder = await getServiceOrderByOrderNumber(session.orderNumber);
+        if (existingOrder) {
+          await finalizeCreationSuccess(existingOrder, source);
+        } else {
+          finalizeCreationError(`Não foi possível confirmar a criação da OS ${session.orderNumber}.`);
+        }
+      } catch (lookupError) {
+        console.warn('Falha ao buscar OS por order_number:', lookupError);
+        finalizeCreationError('Não foi possível confirmar a criação da OS ao retornar ao foco.');
+      } finally {
+        resolvingVisibilityRef.current = false;
+      }
+    },
+    [creating, finalizeCreationError, finalizeCreationSuccess]
+  );
+
+  useEffect(() => {
     const onVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        checkCreatingTimeout('visibilitychange');
+        void resolveCreationOnVisibility('retorno ao foco');
       }
     };
-    const onPageShow = () => checkCreatingTimeout('pageshow');
-    const onFocus = () => checkCreatingTimeout('focus');
-    const onResume = () => checkCreatingTimeout('resume');
+    const onPageShow = () => void resolveCreationOnVisibility('pageshow');
+    const onFocus = () => void resolveCreationOnVisibility('focus');
+    const onResume = () => void resolveCreationOnVisibility('resume');
 
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pageshow', onPageShow);
@@ -258,7 +316,7 @@ export default function AdminOrders() {
       window.removeEventListener('focus', onFocus);
       document.removeEventListener('resume', onResume as EventListener);
     };
-  }, [creating, loadData, toast]);
+  }, [resolveCreationOnVisibility]);
 
   const filterOrders = () => {
     let filtered = [...orders];
@@ -412,6 +470,12 @@ export default function AdminOrders() {
     const startedAt = Date.now();
     setCreating(true);
     const orderNumber = generateOrderNumber();
+    creatingSessionRef.current = {
+      orderNumber,
+      startedAt,
+      opId,
+      resolved: false,
+    };
     const abortController = new AbortController();
     const shouldAbortOnVisibility = !location.pathname.startsWith('/admin');
     let didAbortFromVisibility = false;
@@ -441,6 +505,9 @@ export default function AdminOrders() {
     // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
     const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
     const watchdog = window.setTimeout(() => {
+      if (creatingSessionRef.current?.resolved) {
+        return;
+      }
       const elapsed = Date.now() - startedAt;
       console.warn('[OS]', opId, 'WATCHDOG fired', { elapsed, vis: document.visibilityState });
 
@@ -503,27 +570,11 @@ export default function AdminOrders() {
         }
       }
 
-      toast({
-        title: 'Ordem criada',
-        description: `OS ${order.order_number || order.id}`,
-      });
+      if (creatingSessionRef.current?.resolved) {
+        return;
+      }
 
-      // ✅ limpa drafts e fecha diálogos
-      safeStorage.removeItem(FORM_DRAFT_KEY);
-      safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
-
-      setShowConfirmation(false);
-      setDialogOpen(false);
-
-      // ✅ reset total do estado
-      form.reset();
-      setIsNewClient(false);
-      setHasMultipleItems(false);
-      setAdditionalItems([]);
-      setSelectedImages([]);
-      setPendingOrderData(null);
-
-      await loadData(); // ✅ aqui é melhor await
+      await finalizeCreationSuccess(order, '');
     } catch (err: any) {
       console.error('❌ Falha ao criar OS:', err);
 
@@ -533,44 +584,21 @@ export default function AdminOrders() {
           const existingOrder = await getServiceOrderByOrderNumber(orderNumber);
           if (existingOrder) {
             recovered = true;
-            toast({
-              title: 'Ordem criada',
-              description: `OS ${existingOrder.order_number || existingOrder.id}`,
-            });
-
-            safeStorage.removeItem(FORM_DRAFT_KEY);
-            safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
-
-            setShowConfirmation(false);
-            setDialogOpen(false);
-            form.reset();
-            setIsNewClient(false);
-            setHasMultipleItems(false);
-            setAdditionalItems([]);
-            setSelectedImages([]);
-            setPendingOrderData(null);
-
-            await loadData();
+            if (!creatingSessionRef.current?.resolved) {
+              await finalizeCreationSuccess(existingOrder, 'recuperado');
+            }
           }
         } catch (lookupError) {
           console.warn('Falha ao buscar OS por order_number:', lookupError);
         }
       }
 
-      if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError') {
-        toast({
-          title: 'Erro ao criar OS',
-          description:
-            err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
-              ? 'Sem conexão no momento. Verifique internet e tente novamente.'
-              : err?.message || 'Falha inesperada ao criar a OS.',
-          variant: 'destructive',
-        });
-      }
-
-      if (!recovered) {
-        // mantém rascunho do form (não apaga)
-        safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+      if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError' && !creatingSessionRef.current?.resolved) {
+        finalizeCreationError(
+          err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
+            ? 'Sem conexão no momento. Verifique internet e tente novamente.'
+            : err?.message || 'Falha inesperada ao criar a OS.'
+        );
       }
     } finally {
       clearTimeout(watchdog);
@@ -578,7 +606,9 @@ export default function AdminOrders() {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
         window.removeEventListener('pagehide', handlePageHide);
       }
-      setCreating(false);
+      if (!creatingSessionRef.current?.resolved) {
+        setCreating(false);
+      }
       if (didAbortFromVisibility && !didAbortNotify) {
         toast({
           title: 'Criação interrompida em background',
@@ -588,6 +618,9 @@ export default function AdminOrders() {
         });
         // mantém rascunho do form (não apaga)
         safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+      }
+      if (creatingSessionRef.current?.opId === opId) {
+        creatingSessionRef.current = null;
       }
     }
   };
