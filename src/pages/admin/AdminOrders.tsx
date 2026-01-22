@@ -30,6 +30,7 @@ import {
   getServiceOrderByOrderNumber,
   uploadOrderImage,
 } from '@/db/api';
+import { ensureFreshSession } from '@/db/supabase';
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
 import { secureTabStorage } from '@/utils/secureTabStorage';
 import { useToast } from '@/hooks/use-toast';
@@ -471,6 +472,16 @@ export default function AdminOrders() {
     if (!pendingOrderData) return;
 
     const data = pendingOrderData;
+
+    const hasFreshSession = await ensureFreshSession();
+    if (!hasFreshSession) {
+      toast({
+        title: 'Sessão expirada',
+        description: 'Faça login novamente para continuar.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const startedAt = Date.now();
