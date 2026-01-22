@@ -35,12 +35,44 @@ const memoryLock = async (_key: string, _acquireTimeout: number, fn: () => Promi
   return run;
 };
 
+const memoryStorage = (() => {
+  const store = new Map<string, string>();
+  return {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      store.set(key, value);
+    },
+    removeItem: (key: string) => {
+      store.delete(key);
+    },
+  };
+})();
+
+const resolveSupabaseStorage = () => {
+  if (typeof window === 'undefined') {
+    return memoryStorage;
+  }
+
+  try {
+    const testKey = '__supabase_storage_test__';
+    window.localStorage.setItem(testKey, testKey);
+    window.localStorage.removeItem(testKey);
+    return window.localStorage;
+  } catch (error) {
+    console.warn(
+      '⚠️ Supabase auth storage unavailable. Falling back to in-memory storage (sessions will not persist across reloads).',
+      error
+    );
+    return memoryStorage;
+  }
+};
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
     detectSessionInUrl: true,
-    storage: localStorage,
+    storage: resolveSupabaseStorage(),
     flowType: 'pkce',
 
     // ✅ THE FIX (prevents AbortError in _acquireLock/initialize)
