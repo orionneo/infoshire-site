@@ -38,6 +38,7 @@ import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types
 
 // Chave para salvar o rascunho do formulário
 const FORM_DRAFT_KEY = 'admin_order_form_draft';
+const ORDER_CONFIRMATION_KEY = 'admin_order_confirmation_data';
 type CreatingSession = {
   orderNumber: string;
   startedAt: number;
@@ -229,6 +230,7 @@ export default function AdminOrders() {
     setAdditionalItems([]);
     setSelectedImages([]);
     setPendingOrderData(null);
+    secureTabStorage.removeItem(ORDER_CONFIRMATION_KEY);
   }, [form]);
 
   const finalizeCreationSuccess = useCallback(
@@ -464,7 +466,9 @@ export default function AdminOrders() {
     }
 
     // Todas as validações passaram - mostrar confirmação
-    setPendingOrderData(data);
+    const pendingData = { ...data };
+    setPendingOrderData(pendingData);
+    secureTabStorage.setItem(ORDER_CONFIRMATION_KEY, JSON.stringify(pendingData));
     setShowConfirmation(true);
   };
 
@@ -598,6 +602,7 @@ export default function AdminOrders() {
       // ✅ limpa drafts e fecha diálogos
       secureTabStorage.removeItem(FORM_DRAFT_KEY);
       secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
+      secureTabStorage.removeItem(ORDER_CONFIRMATION_KEY);
 
       setShowConfirmation(false);
       setDialogOpen(false);

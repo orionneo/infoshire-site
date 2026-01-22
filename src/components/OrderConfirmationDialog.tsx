@@ -60,6 +60,7 @@ export function OrderConfirmationDialog({
     additionalItems,
     selectedImages,
   } = data;
+  const isDataInconsistent = !equipment?.trim() && !problem_description?.trim();
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -76,6 +77,21 @@ export function OrderConfirmationDialog({
 
         <ScrollArea className="max-h-[60vh] pr-4">
           <div className="space-y-4">
+            {isDataInconsistent && (
+              <Card className="border-destructive/40 bg-destructive/10">
+                <CardContent className="pt-6">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="font-medium text-destructive">Dados incompletos</p>
+                      <p className="text-sm text-destructive/90">
+                        Não foi possível validar o equipamento e a descrição do problema. Volte e revise o formulário antes de confirmar.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
             {/* Informações do Cliente */}
             <Card>
               <CardContent className="pt-6">
@@ -305,7 +321,7 @@ export function OrderConfirmationDialog({
           <Button
             type="button"
             onClick={onConfirm}
-            disabled={loading}
+            disabled={loading || isDataInconsistent}
             className="min-w-[140px]"
           >
             {loading ? (
