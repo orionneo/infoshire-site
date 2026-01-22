@@ -13,7 +13,7 @@ import type {
   ServiceOrderWithClient,
   SiteSetting,
 } from '@/types/types';
-import { supabase, wakeSupabase } from './supabase';
+import { supabase } from './supabase';
 import { getOrderImagesBucket } from '@/db/storage';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -181,9 +181,17 @@ export async function getServiceOrder(id: string): Promise<ServiceOrderWithClien
 
 type CreateServiceOrderOptions = {
   /** ADMIN: false => nunca enfileira offline (sem "sincronizando") */
+  /**
+   * Quando false, desabilita completamente o fallback offline (modo ADMIN).
+   * Se offline ou der erro, lança exceção em vez de enfileirar.
+   */
   allowOfflineQueue?: boolean;
-  /** Timeout global (ms) */
+
+  /** Timeout global do fluxo de criação (ms). Default 60000 */
   timeoutMs?: number;
+
+  /** Texto inicial do histórico (quando cria a OS) */
+  notes?: string | null;
 };
 
 // ============================
@@ -247,96 +255,84 @@ export async function createServiceOrder(
   },
   options: CreateServiceOrderOptions = {}
 ): Promise<ServiceOrder> {
-  // ✅ Mantemos simples e confiável (como no app original):
-  // - sempre online (admin/web/pwa)
-  // - timeouts para evitar "loading infinito" quando o PWA volta do background
-  // - se não houver sessão, falha com mensagem clara (sem fila offline)
+  // ✅ Require auth — avoids silent 401s and weird offline retries
+  const { data: userData, error: userErr } = await supabase.auth.getUser();
+  if (userErr) throw userErr;
+  if (!userData?.user) throw new Error('Not authenticated');
 
-  const overallTimeoutMs = options.timeoutMs ?? 60000;
+  const nowIso = new Date().toISOString();
+  const entryDate = order.entry_date ?? nowIso;
 
-  // 0) Garantir sessão "acordada" (refresh token / validação)
-  const session = await wakeSupabase('createServiceOrder');
-  if (!session) {
-    const e: any = new Error('Sessão expirada. Faça login novamente.');
-    e.code = 'AUTH_REQUIRED';
-    throw e;
-  }
-
-  if (!isOnlineNow()) {
-    // ✅ Admin/PWA: sem conexão = não dá para gerar número da OS (RPC)
-    const e: any = new Error('Sem conexão no momento. Verifique sua internet e tente novamente.');
-    e.code = 'OFFLINE';
-    throw e;
-  }
-
-  const work = async (): Promise<ServiceOrder> => {
-    // 1) Gerar número da OS (RPC)
-    const { data: orderNumber, error: numberError } = await withTimeout(
+  // ✅ Prefer DB order number when available, but never block order creation.
+  let orderNumber: string;
+  try {
+    const { data: orderNumData, error: orderNumError } = await withTimeout(
       supabase.rpc('generate_order_number'),
-      20000,
-      'generate_order_number'
+      8000,
+      'generate_order_number timeout after 8000ms'
     );
-    if (numberError) throw numberError;
+    if (orderNumError) throw orderNumError;
+    orderNumber =
+      (typeof orderNumData === 'string' && orderNumData) ||
+      `SO-${Date.now()}`;
+  } catch {
+    orderNumber = `SO-${Date.now()}`;
+  }
 
-    // 2) Inserir OS (idempotência não é obrigatória aqui; manter fluxo simples)
-    const { data, error } = await withTimeout(
-      supabase
-        .from('service_orders')
-        .insert({
-          client_id: order.client_id,
-          equipment: order.equipment,
-          serial_number: order.serial_number || null,
-          entry_date: order.entry_date || new Date().toISOString(),
-          equipment_photo_url: order.equipment_photo_url || null,
-          problem_description: order.problem_description,
-          estimated_completion: order.estimated_completion || null,
-          has_multiple_items: order.has_multiple_items || false,
-          order_number: orderNumber,
-        })
-        .select()
-        .single(),
-      20000,
-      'insert service_orders'
-    );
-    if (error) throw error;
-
-    // 3) Criar histórico inicial
-    const { data: userRes, error: userErr } = await withTimeout(supabase.auth.getUser(), 15000, 'auth.getUser');
-    if (userErr) throw userErr;
-    const createdBy = userRes.user?.id ?? order.client_id;
-
-    await withTimeout(
-      createOrderStatusHistory({
-        order_id: data.id,
-        status: 'received',
-        notes: 'Ordem de serviço criada',
-        created_by: createdBy,
-      }),
-      15000,
-      'createOrderStatusHistory'
-    );
-
-    // 4) Itens adicionais (se houver)
-    if (order.items && order.items.length > 0) {
-      await withTimeout(createServiceOrderItems(data.id, order.items), 20000, 'createServiceOrderItems');
-    }
-
-    return data as ServiceOrder;
+  // ✅ Insert the order (simple, direct – like the original medo.dev project)
+  const payload: Partial<ServiceOrder> = {
+    client_id: order.client_id,
+    equipment: order.equipment,
+    serial_number: order.serial_number,
+    entry_date: entryDate,
+    equipment_photo_url: order.equipment_photo_url,
+    problem_description: order.problem_description,
+    estimated_completion: order.estimated_completion,
+    has_multiple_items: order.has_multiple_items ?? false,
+    order_number: orderNumber,
+    status: 'received',
+updated_at: nowIso,
   };
 
-  try {
-    return await withTimeout(work(), overallTimeoutMs, 'createServiceOrder(overall)');
-  } catch (err: any) {
-    // Mensagens mais amigáveis
-    if (isTimeoutErr(err)) {
-      throw new Error('A criação da OS demorou demais (timeout). Tente novamente.');
-    }
-    if (isNetworkErr(err)) {
-      throw new Error('Falha de conexão ao criar a OS. Verifique sua internet e tente novamente.');
-    }
-    throw err;
+  const { data: created, error: insertError } = await supabase
+    .from('service_orders')
+    .insert(payload)
+    .select()
+    .single();
+
+  if (insertError) throw insertError;
+
+  // ✅ Optional items
+  if (order.items?.length) {
+    const itemsPayload = order.items.map((it) => ({
+      service_order_id: created.id,
+      equipment: it.equipment,
+      serial_number: it.serial_number,
+      description: it.description ?? null,
+    }));
+
+    const { error: itemsError } = await supabase
+      .from('service_order_items')
+      .insert(itemsPayload);
+
+    if (itemsError) throw itemsError;
   }
+
+  // ✅ Optional status history (best-effort)
+  try {
+    const notes = options.notes ?? 'Ordem de serviço criada';
+    await supabase.from('order_status_history').insert({
+      service_order_id: created.id,
+      status: 'received',
+      notes,
+});
+  } catch {
+    // ignore (doesn't block order creation)
+  }
+
+  return created as ServiceOrder;
 }
+
 
 export async function updateServiceOrder(
   id: string,
