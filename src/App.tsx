@@ -18,13 +18,15 @@ import { installAutoSyncListeners } from '@/utils/autoSync';
 function AppShell() {
   const location = useLocation();
   const autoSyncCleanupRef = useRef<null | (() => void)>(null);
+  const isAdminRoute = () =>
+    location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
 
   // Mostra checagem de conexão APENAS em rotas autenticadas
-  const showConnectionStatus = location.pathname.startsWith('/client');
+  const showConnectionStatus = location.pathname.startsWith('/client') && !isAdminRoute();
 
   useEffect(() => {
   // 🚫 Admin NÃO usa fila offline e esse drain em "visibilitychange" pode gerar lock/AbortError no Supabase Auth
-  if (location.pathname.startsWith('/admin')) return;
+  if (isAdminRoute()) return;
 
   const drain = () => {
     // não bloqueia UI, só tenta sincronizar
@@ -61,7 +63,7 @@ function AppShell() {
     document.removeEventListener('visibilitychange', onVisibility);
     window.clearTimeout(t);
   };
-}, [location.pathname]);
+}, [location.hash, location.pathname]);
 
   useEffect(() => {
     const shouldEnable = () =>
@@ -99,7 +101,7 @@ function AppShell() {
         <RouteGuard>
           <ScrollToTop />
           <IntersectObserver />
-          {!location.pathname.startsWith('/admin') ? <AnalyticsTracker /> : null}
+          {!isAdminRoute() ? <AnalyticsTracker /> : null}
           <GlobalGamerBackground />
 
           <div className="flex flex-col min-h-screen relative z-10">
