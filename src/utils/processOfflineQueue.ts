@@ -1,4 +1,4 @@
-import { supabase } from '@/db/supabase';
+import { supabase, ensureFreshSession } from '@/db/supabase';
 import { getPendingTasks, markTaskDone, markTaskFailed, type OfflineTask } from './offlineQueue';
 
 /**
@@ -14,9 +14,10 @@ export async function processOfflineQueue() {
   for (const task of tasks) {
     try {
       // ✅ Se a sessão expirou, pare aqui para evitar loops.
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        await markTaskFailed(task.id, 'Sessão expirada. Faça login para sincronizar.');
+      try {
+        await ensureFreshSession(60);
+      } catch (e: any) {
+        await markTaskFailed(task.id, e?.message || 'Sessão expirada. Faça login para sincronizar.');
         // removemos da fila para não loopar eternamente
         await markTaskDone(task.id);
         continue;

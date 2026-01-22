@@ -13,7 +13,7 @@ import type {
   ServiceOrderWithClient,
   SiteSetting,
 } from '@/types/types';
-import { supabase } from './supabase';
+import { supabase, ensureFreshSession } from './supabase';
 import { getOrderImagesBucket } from '@/db/storage';
 import { format, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -225,14 +225,12 @@ export async function createServiceOrder(
 ): Promise<ServiceOrder> {
   const timeoutMs = options.timeoutMs ?? 15000;
 
-  // ✅ Exigir sessão: evita POST sem JWT (vira 401/RLS e fica "travando")
-  const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-  if (sessionErr) {
-    throw sessionErr;
-  }
-  if (!sessionData.session?.user) {
-    throw new Error('Sessão expirada. Faça login novamente.');
-  }
+  // ✅ Garantir sessão válida (evita 401/RLS e "travadas" após trocar de aba/PWA background)
+  await ensureFreshSession(60);
+  const { data: userData, error: userErr } = await supabase.auth.getUser();
+  if (userErr) throw userErr;
+  if (!userData.user) throw new Error('Sessão expirada. Faça login novamente.');
+
 
   // ADMIN deve criar online. Se estiver offline, falha rápido e claro.
   if (!navigator.onLine) {
@@ -302,7 +300,7 @@ export async function createServiceOrder(
     order_id: created.id,
     status: 'received',
     notes: 'Ordem de serviço criada',
-    created_by: sessionData.session.user.id,
+    created_by: userData.user.id,
   });
   // Se não der permissão para histórico, não travamos a criação da OS:
   if (historyRes.error) {

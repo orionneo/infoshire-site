@@ -386,7 +386,7 @@ const handleConfirmOrder = async () => {
         }))
       : undefined,
   },
-  { allowOfflineQueue: false, timeoutMs: 60000 } // ✅ ADMIN: sem "sincronizando"
+  { allowOfflineQueue: false, timeoutMs: 20000 } // ✅ ADMIN: sem "sincronizando"
 );
 
 
