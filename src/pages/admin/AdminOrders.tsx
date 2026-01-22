@@ -407,14 +407,15 @@ const handleConfirmOrder = async () => {
   const startedAt = Date.now();
   const abortController = new AbortController();
   let didAbortFromVisibility = false;
+  let didAbortNotify = false;
+  let cleanupTriggered = false;
 
   setCreating(true);
 
   // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
   const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
   const watchdog = window.setTimeout(() => {
-    
-  const elapsed = Date.now() - startedAt;
+    const elapsed = Date.now() - startedAt;
     console.warn('[OS]', opId, 'WATCHDOG fired', { elapsed, vis: document.visibilityState });
 
     // ✅ 1) destrava UI IMEDIATAMENTE (não pode depender de await)
@@ -432,11 +433,32 @@ const handleConfirmOrder = async () => {
     void loadData().catch((e) => console.warn('[OS]', opId, 'WATCHDOG loadData failed', e));
   }, WATCHDOG_MS);
 
+  const cleanupImmediate = (reason: 'visibilitychange' | 'pagehide') => {
+    if (cleanupTriggered) return;
+    cleanupTriggered = true;
+    clearTimeout(watchdog);
+    setCreating(false);
+    if (!didAbortNotify) {
+      didAbortNotify = true;
+      toast({
+        title: 'Criação interrompida em background',
+        description:
+          'A aba foi para segundo plano e a requisição foi cancelada. Verifique a lista de OS; se necessário, tente novamente.',
+        variant: 'destructive',
+      });
+    }
+    void loadData().catch((e) => console.warn('[OS]', opId, 'abort loadData failed', e));
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    window.removeEventListener('pagehide', handlePageHide);
+    console.warn('[OS]', opId, 'cleanup immediate due to', reason);
+  };
+
   const onVisibilityAbort = (reason: 'visibilitychange' | 'pagehide') => {
     if (abortController.signal.aborted) return;
     didAbortFromVisibility = true;
     console.error(`[OS] ${opId} abortado (${reason})`);
     abortController.abort();
+    cleanupImmediate(reason);
   };
 
   const handleVisibilityChange = () => {
@@ -538,7 +560,7 @@ const handleConfirmOrder = async () => {
     document.removeEventListener('visibilitychange', handleVisibilityChange);
     window.removeEventListener('pagehide', handlePageHide);
     setCreating(false);
-    if (didAbortFromVisibility) {
+    if (didAbortFromVisibility && !didAbortNotify) {
       toast({
         title: 'Criação interrompida em background',
         description:
