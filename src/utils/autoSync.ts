@@ -43,7 +43,7 @@ export function subscribeSyncStatus(fn: Listener): () => void {
 // Ping simples (sem fila/offline)
 function isAdminRoute(): boolean {
   if (typeof window === 'undefined') return false;
-  return window.location.hash.startsWith('#/admin') || window.location.pathname.startsWith('/admin');
+  return window.location.hash.startsWith('#/admin');
 }
 
 export async function runAutoSync(reason: string = 'autoSync'): Promise<void> {

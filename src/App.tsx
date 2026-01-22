@@ -19,7 +19,7 @@ function AppShell() {
   const location = useLocation();
   const autoSyncCleanupRef = useRef<null | (() => void)>(null);
   const isAdminRoute = () =>
-    location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
+    location.hash.startsWith('#/admin');
 
   // Mostra checagem de conexão APENAS em rotas autenticadas
   const showConnectionStatus = location.pathname.startsWith('/client') && !isAdminRoute();
@@ -63,11 +63,11 @@ function AppShell() {
     document.removeEventListener('visibilitychange', onVisibility);
     window.clearTimeout(t);
   };
-}, [location.hash, location.pathname]);
+}, [location.hash]);
 
   useEffect(() => {
     const shouldEnable = () =>
-      !window.location.hash.startsWith('#/admin') && !window.location.pathname.startsWith('/admin');
+      !window.location.hash.startsWith('#/admin');
 
     const updateListeners = () => {
       const enabled = shouldEnable();
