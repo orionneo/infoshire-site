@@ -33,6 +33,10 @@ export function StatePersistence({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (window.location.hash.startsWith('#/admin')) {
+      return;
+    }
+
     // Salvar rota atual quando mudar
     const saveCurrentState = () => {
       secureTabStorage.setItem('app_last_route', location.pathname);
