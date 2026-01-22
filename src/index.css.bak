@@ -1,8 +1,3 @@
-html, body {
-  font-family: "InterDisplay", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-}
-
-
 /* stylelint-disable */
 @tailwind base;
 @tailwind components;
