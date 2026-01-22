@@ -53,12 +53,18 @@ function handleApiError(error: any, context: string): never {
 // Aceita PromiseLike porque Supabase PostgrestBuilder é "thenable"
 // ================================
 
-function withTimeoutVisAware<T>(promiseLike: PromiseLike<T>, ms: number, label: string): Promise<T> {
+function withTimeoutVisAware<T>(
+  promiseLike: PromiseLike<T>,
+  ms: number,
+  label: string,
+  abortSignal?: AbortSignal
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const start = Date.now();
     let settled = false;
     let t: any;
     let backgrounded = false;
+    let abortListener: (() => void) | null = null;
 
     const cleanup = () => {
       settled = true;
@@ -69,6 +75,9 @@ function withTimeoutVisAware<T>(promiseLike: PromiseLike<T>, ms: number, label: 
       document.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('freeze', onFreeze);
       document.removeEventListener('resume', onResume as EventListener);
+      if (abortSignal && abortListener) {
+        abortSignal.removeEventListener('abort', abortListener);
+      }
     };
 
     const fail = (suffix?: string) => {
@@ -117,6 +126,20 @@ function withTimeoutVisAware<T>(promiseLike: PromiseLike<T>, ms: number, label: 
     document.addEventListener('pagehide', onPageHide);
     document.addEventListener('freeze', onFreeze);
     document.addEventListener('resume', onResume as EventListener);
+
+    if (abortSignal) {
+      if (abortSignal.aborted) {
+        cleanup();
+        reject(new DOMException('Aborted', 'AbortError'));
+        return;
+      }
+      abortListener = () => {
+        if (settled) return;
+        cleanup();
+        reject(new DOMException('Aborted', 'AbortError'));
+      };
+      abortSignal.addEventListener('abort', abortListener);
+    }
 
     // Timer normal (funciona quando aba está ativa)
     t = setTimeout(() => {
@@ -407,7 +430,8 @@ export async function createServiceOrder(
     inserted = await withTimeoutVisAware(
       supabaseWithSignal.from('service_orders').insert(payload).select().single(),
       timeoutMs,
-      'create_service_order timeout'
+      'create_service_order timeout',
+      abortSignal
     );
   } catch (e: any) {
     if (abortSignal.aborted) {
@@ -439,7 +463,8 @@ export async function createServiceOrder(
     const itemsRes = await withTimeoutVisAware(
       supabaseWithSignal.from('service_order_items').insert(itemsPayload),
       timeoutMs,
-      'create_service_order_items timeout'
+      'create_service_order_items timeout',
+      abortSignal
     );
     if (itemsRes.error) throw itemsRes.error;
   }
@@ -457,7 +482,8 @@ export async function createServiceOrder(
           created_by: sessionData.session.user.id,
         }),
         5000,
-        'create_order_status_history timeout'
+        'create_order_status_history timeout',
+        abortSignal
       );
 
       if ((historyRes as any)?.error) {
