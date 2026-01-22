@@ -32,6 +32,7 @@ import {
 } from '@/db/api';
 import { ensureFreshSession } from '@/db/supabase';
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
+import { safeStorage } from '@/utils/safeStorage';
 import { secureTabStorage } from '@/utils/secureTabStorage';
 import { useToast } from '@/hooks/use-toast';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
@@ -277,13 +278,23 @@ export default function AdminOrders() {
 
   const resolveCreationOnVisibility = useCallback(
     async (source: string) => {
-      if (!creating || resolvingVisibilityRef.current) return;
+      if (resolvingVisibilityRef.current) return;
       const session = creatingSessionRef.current;
-      if (!session || session.resolved) return;
+      let snapshot = null;
+      const snapshotValue = secureTabStorage.getItem('ORDER_DRAFT_FALLBACK');
+      if (snapshotValue) {
+        try {
+          snapshot = JSON.parse(snapshotValue);
+        } catch (error) {
+          console.warn('Erro ao ler snapshot da OS:', error);
+        }
+      }
+      const orderNumber = session?.orderNumber || snapshot?.order_number;
+      if (!orderNumber || session?.resolved) return;
 
       resolvingVisibilityRef.current = true;
       try {
-        const existingOrder = await getServiceOrderByOrderNumber(session.orderNumber);
+        const existingOrder = await getServiceOrderByOrderNumber(orderNumber);
         if (existingOrder) {
           if (source === 'retorno ao foco') {
             toast({
@@ -292,12 +303,14 @@ export default function AdminOrders() {
             });
           }
           await finalizeCreationSuccess(existingOrder, source);
-        } else {
-          finalizeCreationError(`Não foi possível confirmar a criação da OS ${session.orderNumber}.`);
+        } else if (creating) {
+          finalizeCreationError(`Não foi possível confirmar a criação da OS ${orderNumber}.`);
         }
       } catch (lookupError) {
         console.warn('Falha ao buscar OS por order_number:', lookupError);
-        finalizeCreationError('Não foi possível confirmar a criação da OS ao retornar ao foco.');
+        if (creating) {
+          finalizeCreationError('Não foi possível confirmar a criação da OS ao retornar ao foco.');
+        }
       } finally {
         resolvingVisibilityRef.current = false;
       }
@@ -502,37 +515,34 @@ export default function AdminOrders() {
   };
 
   const handleConfirmOrder = async () => {
-    if (!pendingOrderData) {
+    const formValues = form.getValues();
+    const hasFormValues = Object.values(formValues).some((value) => {
+      if (value === null || value === undefined) return false;
+      if (typeof value === 'string') return value.trim().length > 0;
+      return true;
+    });
+    const draftValue = secureTabStorage.getItem(FORM_DRAFT_KEY) || secureTabStorage.getItem('ORDER_DRAFT_FALLBACK');
+    let draft = null;
+    if (draftValue) {
+      try {
+        draft = JSON.parse(draftValue);
+      } catch (error) {
+        console.warn('Erro ao restaurar rascunho da OS:', error);
+      }
+    }
+    const data = hasFormValues ? formValues : draft;
+
+    if (!data) {
       toast({
         title: 'Dados da OS não encontrados',
-        description: 'Dados da OS não encontrados, reabra a confirmação',
+        description: 'Não foi possível recuperar o rascunho. Revise a confirmação e tente novamente.',
         variant: 'destructive',
       });
-
-      const draftValue =
-        secureTabStorage.getItem(FORM_DRAFT_KEY) || secureTabStorage.getItem('ORDER_DRAFT_FALLBACK');
-
-      if (draftValue) {
-        try {
-          const draft = JSON.parse(draftValue);
-          setPendingOrderData(draft);
-          setShowConfirmation(true);
-          return;
-        } catch (error) {
-          console.warn('Erro ao restaurar rascunho da OS:', error);
-        }
-      }
-
-      setShowConfirmation(false);
-      toast({
-        title: 'Revise o formulário',
-        description: 'Não foi possível recuperar o rascunho. Revise o formulário e tente novamente.',
-        variant: 'destructive',
-      });
+      setShowConfirmation(true);
       return;
     }
 
-    const data = pendingOrderData;
+    setPendingOrderData(data);
 
     const hasFreshSession = await ensureFreshSession();
     if (!hasFreshSession) {
@@ -548,6 +558,8 @@ export default function AdminOrders() {
     const startedAt = Date.now();
     setCreating(true);
     const orderNumber = generateOrderNumber();
+    const snapshot = { ...data, order_number: orderNumber };
+    secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(snapshot));
     creatingSessionRef.current = {
       orderNumber,
       startedAt,
@@ -555,8 +567,7 @@ export default function AdminOrders() {
       resolved: false,
     };
     const abortController = new AbortController();
-    const isAdminRoute = location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
-    const shouldAbortOnVisibility = !isAdminRoute;
+    const shouldAbortOnVisibility = false;
     let didAbortFromVisibility = false;
     let didAbortNotify = false;
 
