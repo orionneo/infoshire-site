@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Loader2, Plus, Search, Trash2, UserPlus, X, ChevronDown, ChevronUp } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
@@ -101,6 +101,16 @@ export default function AdminOrders() {
   >([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [pendingOrderData, setPendingOrderData] = useState<any>(null);
+  const isCreatingStale = useMemo(
+    () => creatingSessionRef.current && Date.now() - creatingSessionRef.current.startedAt > 25000,
+    [creating]
+  );
+
+  useEffect(() => {
+    if (!isCreatingStale) return;
+    setCreating(false);
+    creatingSessionRef.current = null;
+  }, [isCreatingStale]);
 
   useEffect(() => {
     if (!showConfirmation) return;
@@ -578,6 +588,11 @@ export default function AdminOrders() {
   };
 
   const handleConfirmOrder = async () => {
+    if (creating && isCreatingStale) {
+      setCreating(false);
+      creatingSessionRef.current = null;
+    }
+
     const data = pendingOrderRef.current ?? readDraftFromStorage();
 
     if (!data) {
@@ -1451,7 +1466,7 @@ export default function AdminOrders() {
         }}
         onConfirm={handleConfirmOrder}
         onCancel={handleConfirmationCancel}
-        loading={creating}
+        loading={creating && !isCreatingStale}
       />
     </AdminLayout>
   );
