@@ -542,6 +542,8 @@ export default function AdminOrders() {
           email: data.new_client_email,
           phone: data.new_client_phone,
           password: data.new_client_password,
+          timeoutMs: 15000,
+          abortSignal: abortController.signal,
         });
         clientId = newClient.id;
       }
