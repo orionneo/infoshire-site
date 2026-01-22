@@ -443,7 +443,12 @@ export async function createServiceOrder(
   const abortSignal = abortController.signal;
 
   // ✅ Exigir sessão: evita POST sem JWT
-  const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+  const { data: sessionData, error: sessionErr } = await withTimeoutVisAware(
+    supabase.auth.getSession(),
+    timeoutMs,
+    'create_service_order.getSession',
+    abortSignal
+  );
   if (sessionErr) throw sessionErr;
   if (!sessionData.session?.user) throw new Error('Sessão expirada. Faça login novamente.');
   const supabaseWithSignal = createAbortableSupabaseClient(
