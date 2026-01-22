@@ -1,24 +1,33 @@
 // src/utils/adminCache.ts
-import type { ServiceOrderWithClient, Profile } from '@/types/types';
-
 const KEY = 'infoshire_admin_cache_v1';
 
-export function saveAdminCache(data: { orders: ServiceOrderWithClient[]; clients: Profile[] }) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify({ ...data, savedAt: Date.now() }));
-  } catch {}
-}
+export type AdminCacheData = {
+  // deixe flexível pra não quebrar
+  [k: string]: any;
+};
 
-export function loadAdminCache(): { orders: ServiceOrderWithClient[]; clients: Profile[] } | null {
+export function loadAdminCache(): AdminCacheData | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return {
-      orders: Array.isArray(parsed.orders) ? parsed.orders : [],
-      clients: Array.isArray(parsed.clients) ? parsed.clients : [],
-    };
+    return JSON.parse(raw);
   } catch {
     return null;
+  }
+}
+
+export function saveAdminCache(data: AdminCacheData): void {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(data));
+  } catch {
+    // ignore
+  }
+}
+
+export function clearAdminCache(): void {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    // ignore
   }
 }

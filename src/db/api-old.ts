@@ -21,18 +21,6 @@ import { addOfflineTask, attachBlob, isOnlineNow } from '@/utils/offlineQueue';
 import { v4 as uuid } from 'uuid';
 
 
-
-function fallbackOrderNumber(): string {
-  // formato: OS-YYYYMMDD-HHMM-XXXX
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const rnd = Math.random().toString(16).slice(2, 6).toUpperCase();
-  return `OS-${y}${m}${day}-${hh}${mm}-${rnd}`;
-}
 /**
  * Helper para tratamento de erros de API
  */
@@ -197,8 +185,6 @@ type CreateServiceOrderOptions = {
    * Quando false, desabilita completamente o fallback offline (modo ADMIN).
    * Se offline ou der erro, lança exceção em vez de enfileirar.
    */
-  createHistory?: boolean;
-  firstHistoryNote?: string;
   allowOfflineQueue?: boolean;
 
   /** Timeout global do fluxo de criação (ms). Default 60000 */
@@ -269,71 +255,98 @@ export async function createServiceOrder(
   },
   options: CreateServiceOrderOptions = {}
 ): Promise<ServiceOrder> {
+  // ✅ Require auth — avoids silent 401s and weird offline retries
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   if (userErr) throw userErr;
-  if (!userData.user) throw new Error('Sessão expirada. Faça login novamente.');
+  if (!userData?.user) throw new Error('Not authenticated');
 
-  // Try your RPC, but don't block forever. If it fails, use a safe fallback.
-  let orderNumber: string | null = null;
+  const nowIso = new Date().toISOString();
+  const entryDate = order.entry_date ?? nowIso;
+
+  // ✅ Prefer DB order number when available, but never block order creation.
+  let orderNumber: string;
   try {
-    const rpc = supabase.rpc('generate_order_number', { p_client_id: order.client_id });
-    const { data } = await withTimeout(rpc, 8000, 'generate_order_number');
-    orderNumber = (data as any) ?? null;
-  } catch (e) {
-    console.warn('⚠️ generate_order_number failed, using fallback:', e);
-    orderNumber = fallbackOrderNumber();
+    const { data: orderNumData, error: orderNumError } = await withTimeout(
+      supabase.rpc('generate_order_number'),
+      8000,
+      'generate_order_number timeout after 8000ms'
+    );
+    if (orderNumError) throw orderNumError;
+    orderNumber =
+      (typeof orderNumData === 'string' && orderNumData) ||
+      `SO-${Date.now()}`;
+  } catch {
+    orderNumber = `SO-${Date.now()}`;
   }
 
-  // Insert order
-  const payload: Record<string, any> = {
-    ...order,
+  // ✅ Insert the order (simple, direct – like the original medo.dev project)
+  const payload: Partial<ServiceOrder> = {
+    client_id: order.client_id,
+    equipment: order.equipment,
+    serial_number: order.serial_number,
+    entry_date: entryDate,
+    equipment_photo_url: order.equipment_photo_url,
+    problem_description: order.problem_description,
+    estimated_completion: order.estimated_completion,
+    has_multiple_items: order.has_multiple_items ?? false,
     order_number: orderNumber,
     status: 'received',
-    // common RLS requirement
-    created_by: userData.user.id,
+updated_at: nowIso,
   };
 
-  const { data: created, error } = await supabase
+  const { data: created, error: insertError } = await supabase
     .from('service_orders')
     .insert(payload)
     .select()
     .single();
 
-  if (error) throw error;
+  if (insertError) throw insertError;
 
-  // Optional: items (if you have this table)
-  if (order.has_multiple_items && Array.isArray(order.items) && order.items.length) {
-    const rows = order.items.map((it) => ({
-      order_id: (created as any).id,
+  // ✅ Optional items
+  if (order.items?.length) {
+    const itemsPayload = order.items.map((it) => ({
+      service_order_id: created.id,
       equipment: it.equipment,
-      serial_number: it.serial_number ?? null,
+      serial_number: it.serial_number,
       description: it.description ?? null,
     }));
-    const { error: itemsErr } = await supabase.from('service_order_items').insert(rows);
-    if (itemsErr) {
-      // Don't fail the whole creation for items; log and move on.
-      console.warn('⚠️ service_order_items insert failed:', itemsErr);
-    }
+
+    const { error: itemsError } = await supabase
+      .from('service_order_items')
+      .insert(itemsPayload);
+
+    if (itemsError) throw itemsError;
   }
 
-  // First history entry (helps timelines)
-  const createHistory = options.createHistory ?? true;
-  if (createHistory) {
-    const notes = options.firstHistoryNote ?? 'Ordem de serviço criada';
-    await updateServiceOrderStatus((created as any).id, 'received', notes, userData.user.id).catch((e) => {
-      console.warn('⚠️ updateServiceOrderStatus (initial) failed:', e);
-    });
+  // ✅ Optional status history (best-effort)
+  try {
+    const notes = options.notes ?? 'Ordem de serviço criada';
+    await supabase.from('order_status_history').insert({
+      service_order_id: created.id,
+      status: 'received',
+      notes,
+});
+  } catch {
+    // ignore (doesn't block order creation)
   }
 
   return created as ServiceOrder;
 }
 
 
+export async function updateServiceOrder(
+  id: string,
+  updates: Partial<ServiceOrder>
+): Promise<ServiceOrder> {
+  const { data, error } = await supabase
+    .from('service_orders')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
 
-export async function updateServiceOrder(id: string, updates: Partial<ServiceOrder>): Promise<ServiceOrder> {
-  const { data, error } = await supabase.from('service_orders').update(updates).eq('id', id).select().single();
   if (error) throw error;
-  return data as ServiceOrder;
+  return data;
 }
 
 export async function updateServiceOrderStatus(
@@ -342,30 +355,30 @@ export async function updateServiceOrderStatus(
   notes: string | null,
   createdBy: string
 ): Promise<ServiceOrder> {
-  // Update order status
-  const { data: order, error: updErr } = await supabase
+  const updates: Partial<ServiceOrder> = { status };
+  
+  if (status === 'completed') {
+    updates.completed_at = new Date().toISOString();
+  }
+
+  const { data, error } = await supabase
     .from('service_orders')
-    .update({ status })
+    .update(updates)
     .eq('id', orderId)
     .select()
     .single();
 
-  if (updErr) throw updErr;
+  if (error) throw error;
 
-  // Insert history (if table exists)
-  const { error: histErr } = await supabase.from('order_status_history').insert({
+  // Create status history entry
+  await createOrderStatusHistory({
     order_id: orderId,
     status,
     notes,
     created_by: createdBy,
   });
 
-  if (histErr) {
-    // history failure shouldn't break the UI
-    console.warn('⚠️ order_status_history insert failed:', histErr);
-  }
-
-  return order as ServiceOrder;
+  return data;
 }
 
 // Atualizar desconto da ordem de serviço

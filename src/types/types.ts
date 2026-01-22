@@ -85,6 +85,13 @@ export type PublicOrderInfo = {
   client_phone_masked?: string;
 };
 
+export type CreateServiceOrderOptions = {
+  createHistory?: boolean;
+  firstHistoryNote?: string;
+};
+
+
+
 export type OrderStatusHistory = {
   id: string;
   order_id: string;

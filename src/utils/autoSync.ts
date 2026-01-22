@@ -1,137 +1,108 @@
-import { processOfflineQueue } from '@/utils/processOfflineQueue';
+// src/utils/autoSync.ts
+import { supabase } from '@/db/supabase';
 
 export type SyncStatus = {
+  // legacy fields (o SyncStatusBadge espera isso)
   online: boolean;
   syncing: boolean;
   lastSyncAt: number | null;
-  lastError: string | null;
   lastReason: string | null;
+
+  // extras úteis
+  lastOkAt: number | null;
+  lastError: string | null;
 };
+
+type Listener = (s: SyncStatus) => void;
+const listeners = new Set<Listener>();
 
 const status: SyncStatus = {
   online: typeof navigator !== 'undefined' ? navigator.onLine : true,
   syncing: false,
   lastSyncAt: null,
-  lastError: null,
   lastReason: null,
+  lastOkAt: null,
+  lastError: null,
 };
 
-const listeners = new Set<(s: SyncStatus) => void>();
-
 function emit() {
-  const snapshot = { ...status };
-  listeners.forEach((fn) => fn(snapshot));
+  const snap = { ...status };
+  for (const fn of listeners) fn(snap);
 }
 
 export function getSyncStatus(): SyncStatus {
   return { ...status };
 }
 
-export function subscribeSyncStatus(fn: (s: SyncStatus) => void): () => void {
+export function subscribeSyncStatus(fn: Listener): () => void {
   listeners.add(fn);
-  fn({ ...status }); // estado inicial
-  return () => {
-    // ✅ retorna void (não boolean), resolve seu erro do useEffect
-    listeners.delete(fn);
-  };
+  fn({ ...status });
+  return () => listeners.delete(fn);
 }
 
-// throttle pra não disparar várias vezes ao voltar pro app
-let running = false;
-let lastRunAt = 0;
-const MIN_INTERVAL_MS = 8000;
+// Ping simples (sem fila/offline)
+export async function runAutoSync(reason: string = 'autoSync'): Promise<void> {
+  status.online = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  status.syncing = true;
+  status.lastReason = reason;
+  status.lastError = null;
+  emit();
 
-export async function runAutoSync(reason: string) {
   try {
-    if (running) return;
+    const { data: sessionData, error: sessErr } = await supabase.auth.getSession();
+    if (sessErr) throw sessErr;
 
-    status.online = typeof navigator !== 'undefined' ? navigator.onLine : true;
-    if (!status.online) {
+    const session = sessionData?.session;
+    if (!session) {
+      // sem sessão => não adianta bater em REST; Badge mostra o motivo
+      status.lastSyncAt = Date.now();
+      status.syncing = false;
+      status.lastError = `[${reason}] sem sessão (usuário deslogado)`;
       emit();
       return;
     }
 
-    const now = Date.now();
-    if (now - lastRunAt < MIN_INTERVAL_MS) return;
-
-    running = true;
-    lastRunAt = now;
-
-    status.syncing = true;
-    status.lastReason = reason;
-    status.lastError = null;
-    emit();
-
-    console.info(`🔄 AutoSync: ${reason}`);
-
-    // ✅ acorda sessão/refresh (iOS/PWA)
-    try {
-      const { wakeSupabase } = await import('@/db/supabase');
-      await wakeSupabase(`autosync:${reason}`);
-    } catch (e) {
-      console.warn('⚠️ wakeSupabase falhou (segue):', e);
-    }
-
-    // ✅ processa fila offline
-    await processOfflineQueue();
+    // “ping” barato: head select. Não precisa retornar dados.
+    // (Se "profiles" não existir, isso falha e cai no catch; ok.)
+    await supabase.from('profiles').select('id', { head: true }).limit(1);
 
     status.lastSyncAt = Date.now();
-    status.lastError = null;
-  } catch (err: any) {
-    status.lastError = err?.message ? String(err.message) : String(err);
-    console.warn('⚠️ AutoSync falhou (segue normal):', err);
-  } finally {
+    status.lastOkAt = Date.now();
     status.syncing = false;
     emit();
-    running = false;
+  } catch (e: any) {
+    status.lastSyncAt = Date.now();
+    status.syncing = false;
+    status.lastError = e?.message ?? String(e);
+    emit();
   }
 }
 
+// compatibilidade com main.tsx
 export function installAutoSyncListeners() {
-  const updateOnline = () => {
-    status.online = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  const onOnline = () => {
+    status.online = true;
+    emit();
+    runAutoSync('online');
+  };
+  const onOffline = () => {
+    status.online = false;
     emit();
   };
-
-  const onVisibility = () => {
-    if (document.visibilityState === 'visible') {
-      void runAutoSync('visibilitychange->visible');
-    }
+  const onVis = () => {
+    if (document.visibilityState === 'visible') runAutoSync('visibility');
   };
-
-  const onPageShow = (e: PageTransitionEvent) => {
-    if ((e as any).persisted) {
-      void runAutoSync('pageshow(bfcache)');
-    } else {
-      void runAutoSync('pageshow');
-    }
-  };
-
-  const onOnline = () => {
-    updateOnline();
-    void runAutoSync('online');
-  };
-
-  const onOffline = () => {
-    updateOnline();
-  };
-
-  const onFocus = () => void runAutoSync('focus');
 
   window.addEventListener('online', onOnline);
   window.addEventListener('offline', onOffline);
-  document.addEventListener('visibilitychange', onVisibility);
-  window.addEventListener('pageshow', onPageShow);
-  window.addEventListener('focus', onFocus);
+  document.addEventListener('visibilitychange', onVis);
 
-  updateOnline();
-  void runAutoSync('startup');
+  // boot
+  runAutoSync('boot');
 
   return () => {
     window.removeEventListener('online', onOnline);
     window.removeEventListener('offline', onOffline);
-    document.removeEventListener('visibilitychange', onVisibility);
-    window.removeEventListener('pageshow', onPageShow);
-    window.removeEventListener('focus', onFocus);
+    document.removeEventListener('visibilitychange', onVis);
   };
 }
