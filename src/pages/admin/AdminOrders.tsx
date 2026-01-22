@@ -281,6 +281,12 @@ export default function AdminOrders() {
       try {
         const existingOrder = await getServiceOrderByOrderNumber(session.orderNumber);
         if (existingOrder) {
+          if (source === 'retorno ao foco') {
+            toast({
+              title: 'OS recuperada após retorno do foco',
+              description: `OS ${existingOrder.order_number || existingOrder.id} confirmada ao voltar para a aba.`,
+            });
+          }
           await finalizeCreationSuccess(existingOrder, source);
         } else {
           finalizeCreationError(`Não foi possível confirmar a criação da OS ${session.orderNumber}.`);
@@ -292,7 +298,7 @@ export default function AdminOrders() {
         resolvingVisibilityRef.current = false;
       }
     },
-    [creating, finalizeCreationError, finalizeCreationSuccess]
+    [creating, finalizeCreationError, finalizeCreationSuccess, toast]
   );
 
   useEffect(() => {
