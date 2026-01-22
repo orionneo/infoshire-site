@@ -29,5 +29,6 @@
     },
     "typeRoots": ["./node_modules/**/*"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.bak", "src/**/*-old.ts", "src/**/*.bak.*"]
 }
