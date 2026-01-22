@@ -40,6 +40,7 @@ import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types
 // Chave para salvar o rascunho do formulário
 const FORM_DRAFT_KEY = 'admin_order_form_draft';
 const PENDING_CONFIRMATION_KEY = 'admin_order_pending_confirmation';
+const CREATE_WATCHDOG_MS = 20000;
 type OrderDraft = Record<string, any>;
 type CreatingSession = {
   orderNumber: string;
@@ -88,6 +89,7 @@ export default function AdminOrders() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [isCreatingStale, setIsCreatingStale] = useState(false);
   const [isNewClient, setIsNewClient] = useState(false);
   const [hasMultipleItems, setHasMultipleItems] = useState(false);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
@@ -127,6 +129,26 @@ export default function AdminOrders() {
       return false;
     }
   }, []);
+
+  useEffect(() => {
+    if (!showConfirmation || !creating) {
+      setIsCreatingStale(false);
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      const session = creatingSessionRef.current;
+      if (!session || session.resolved) {
+        setIsCreatingStale(false);
+        return;
+      }
+
+      const elapsed = Date.now() - session.startedAt;
+      setIsCreatingStale(elapsed > CREATE_WATCHDOG_MS);
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [creating, showConfirmation]);
 
   useEffect(() => {
     if (!showConfirmation) return;
@@ -676,7 +698,6 @@ export default function AdminOrders() {
     }
 
     // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
-    const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
     const watchdog = window.setTimeout(() => {
       if (creatingSessionRef.current?.resolved) {
         return;
@@ -696,7 +717,7 @@ export default function AdminOrders() {
       });
       // ✅ 3) tenta recarregar lista sem bloquear nada
       void loadData().catch((e) => console.warn('[OS]', opId, 'WATCHDOG loadData failed', e));
-    }, WATCHDOG_MS);
+    }, CREATE_WATCHDOG_MS);
 
     try {
       let clientId = data.client_id;
@@ -1485,6 +1506,8 @@ export default function AdminOrders() {
         }}
         onConfirm={handleConfirmOrder}
         onCancel={handleConfirmationCancel}
+        loading={creating}
+        forceEnabled={isCreatingStale}
         loading={creating && !isCreatingStale}
       />
     </AdminLayout>
