@@ -21,16 +21,26 @@ function AppShell() {
   const showConnectionStatus =
     location.pathname.startsWith('/admin') || location.pathname.startsWith('/client');
 
-  useEffect(() => {
-const isAdminRoute = () => {
-  const h = window.location.hash || '';
-  return h.startsWith('#/admin');
-};
+  const isAdminRoute = () => {
+    try {
+      const hash = window.location.hash || '';
+      if (hash.startsWith('#/')) {
+        const p = hash.slice(1);
+        return p.startsWith('/admin');
+      }
+      return (window.location.pathname || '').startsWith('/admin');
+    } catch {
+      return false;
+    }
+  };
 
-const drain = () => {
-  if (isAdminRoute()) return; // ✅ admin não drena fila automaticamente
-  void processOfflineQueue();
-};
+  useEffect(() => {
+  const drain = () => {
+    // ✅ No admin: não rodar offline queue / autosync (evita lock/Abort)
+    if (isAdminRoute()) return;
+    // não bloqueia UI, só tenta sincronizar
+    void processOfflineQueue();
+  };
 
   const onOnline = () => {
     console.log('🌐 Conexão restaurada, processando fila offline...');
@@ -70,7 +80,7 @@ const drain = () => {
         <RouteGuard>
           <ScrollToTop />
           <IntersectObserver />
-          <AnalyticsTracker />
+          {!location.pathname.startsWith('/admin') ? <AnalyticsTracker /> : null}
           <GlobalGamerBackground />
 
           <div className="flex flex-col min-h-screen relative z-10">

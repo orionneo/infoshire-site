@@ -335,7 +335,7 @@ export async function createServiceOrder(
   // ✅ 1) Cria a OS com timeout (não pode travar)
   let inserted: any;
   try {
-    inserted = await withTimeout(
+    inserted = await withTimeoutVisAware(
       supabase.from('service_orders').insert(payload).select().single(),
       timeoutMs,
       'create_service_order timeout'
@@ -364,7 +364,7 @@ export async function createServiceOrder(
       description: it.description ?? null,
     }));
 
-    const itemsRes = await withTimeout(
+    const itemsRes = await withTimeoutVisAware(
       supabase.from('service_order_items').insert(itemsPayload),
       timeoutMs,
       'create_service_order_items timeout'
@@ -377,7 +377,7 @@ export async function createServiceOrder(
   // - Se der timeout/erro/RLS, só loga e segue
   try {
     if (document.visibilityState === 'visible') {
-      const historyRes = await withTimeout(
+      const historyRes = await withTimeoutVisAware(
         supabase.from('order_status_history').insert({
           order_id: created.id,
           status: 'received',

@@ -95,33 +95,20 @@ const NO_ANALYTICS_PREFIXES = [
 /**
  * Decide se deve rodar analytics nesta rota/ambiente.
  */
-function getAppPath(): string {
-  try {
-    // HashRouter: #/admin/orders
-    const h = window.location.hash || '';
-    if (h.startsWith('#')) {
-      const p = h.slice(1); // remove "#"
-      return p.startsWith('/') ? p : `/${p}`;
-    }
-  } catch {}
-  try {
-    return window.location.pathname || '/';
-  } catch {
-    return '/';
-  }
-}
-
-/**
- * Decide se deve rodar analytics nesta rota/ambiente.
- * - Não roda no /admin (admin não precisa de tracking público e pode causar erros/ruído)
- * - Não roda se estiver desabilitado por falhas anteriores (RLS/401/rede)
- * - Não roda para bots
- */
 export function shouldRunAnalytics(): boolean {
-  const path = getAppPath();
-  if (path.startsWith('/admin')) return false;   // ✅ agora funciona no HashRouter
+  try {
+    const path = currentRoutePath();
+    if (NO_ANALYTICS_PREFIXES.some((p) => path.startsWith(p))) return false;
+  } catch {
+    // ignore
+  }
+
   if (isAnalyticsDisabled()) return false;
   if (isBot()) return false;
+
+  // ✅ Evita aborts em background (muito comum em PWA/mobile)
+  if (document.visibilityState !== 'visible') return false;
+
   return true;
 }
 
