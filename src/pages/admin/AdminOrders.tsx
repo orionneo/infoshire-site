@@ -102,6 +102,27 @@ export default function AdminOrders() {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [pendingOrderData, setPendingOrderData] = useState<any>(null);
 
+  useEffect(() => {
+    if (!showConfirmation) return;
+
+    const handleVisibilityRecovery = () => {
+      setCreating(false);
+      if (creatingSessionRef.current?.resolved === false) {
+        creatingSessionRef.current = null;
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityRecovery);
+    window.addEventListener('pageshow', handleVisibilityRecovery);
+    window.addEventListener('focus', handleVisibilityRecovery);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityRecovery);
+      window.removeEventListener('pageshow', handleVisibilityRecovery);
+      window.removeEventListener('focus', handleVisibilityRecovery);
+    };
+  }, [showConfirmation]);
+
   const form = useForm({
     defaultValues: {
       client_id: '',
