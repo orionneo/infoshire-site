@@ -41,8 +41,13 @@ export function subscribeSyncStatus(fn: Listener): () => void {
 }
 
 // Ping simples (sem fila/offline)
+function isAdminRoute(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.location.hash.startsWith('#/admin') || window.location.pathname.startsWith('/admin');
+}
+
 export async function runAutoSync(reason: string = 'autoSync'): Promise<void> {
-  if (window.location.hash.startsWith('#/admin') || window.location.pathname.startsWith('/admin')) return;
+  if (isAdminRoute()) return;
   status.online = typeof navigator !== 'undefined' ? navigator.onLine : true;
   status.syncing = true;
   status.lastReason = reason;
@@ -81,6 +86,7 @@ export async function runAutoSync(reason: string = 'autoSync'): Promise<void> {
 
 // compatibilidade com main.tsx
 export function installAutoSyncListeners() {
+  if (isAdminRoute()) return () => {};
   const onOnline = () => {
     status.online = true;
     emit();

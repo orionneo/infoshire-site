@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Navigate, Route, HashRouter as Router, Routes, useLocation } from 'react-router-dom';
 import IntersectObserver from '@/components/common/IntersectObserver';
 import { RouteGuard } from '@/components/common/RouteGuard';
@@ -13,9 +13,11 @@ import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/contexts/AuthContext';
 import routes from './routes';
 import { processOfflineQueue } from '@/utils/processOfflineQueue';
+import { installAutoSyncListeners } from '@/utils/autoSync';
 
 function AppShell() {
   const location = useLocation();
+  const autoSyncCleanupRef = useRef<null | (() => void)>(null);
 
   // Mostra checagem de conexão APENAS em rotas autenticadas
   const showConnectionStatus = location.pathname.startsWith('/client');
@@ -60,6 +62,35 @@ function AppShell() {
     window.clearTimeout(t);
   };
 }, [location.pathname]);
+
+  useEffect(() => {
+    const shouldEnable = () =>
+      !window.location.hash.startsWith('#/admin') && !window.location.pathname.startsWith('/admin');
+
+    const updateListeners = () => {
+      const enabled = shouldEnable();
+      if (enabled && !autoSyncCleanupRef.current) {
+        autoSyncCleanupRef.current = installAutoSyncListeners();
+      }
+      if (!enabled && autoSyncCleanupRef.current) {
+        autoSyncCleanupRef.current();
+        autoSyncCleanupRef.current = null;
+      }
+    };
+
+    updateListeners();
+    window.addEventListener('hashchange', updateListeners);
+    window.addEventListener('popstate', updateListeners);
+
+    return () => {
+      window.removeEventListener('hashchange', updateListeners);
+      window.removeEventListener('popstate', updateListeners);
+      if (autoSyncCleanupRef.current) {
+        autoSyncCleanupRef.current();
+        autoSyncCleanupRef.current = null;
+      }
+    };
+  }, []);
 
 
   return (
