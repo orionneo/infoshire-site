@@ -51,7 +51,7 @@ const hasIssues = useMemo(() => {
   };
 
   const trySync = async () => {
-    if (window.location.hash.startsWith('#/admin') || window.location.pathname.startsWith('/admin')) return;
+    if (window.location.hash.startsWith('#/admin')) return;
 
     // ✅ Nunca bloqueia nada: só tenta drenar fila
     setSyncing(true);
