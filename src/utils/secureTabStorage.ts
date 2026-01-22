@@ -10,9 +10,27 @@ const getItem = (key: string): string | null => {
   return safeStorage.getItem(key);
 };
 
-const setItem = (key: string, value: string): void => {
-  memoryStore.set(key, value);
-  safeStorage.setItem(key, value);
+let storageBlocked = false;
+
+const setItem = (key: string, value: string): boolean => {
+  if (storageBlocked) {
+    return false;
+  }
+
+  try {
+    const stored = safeStorage.setItem(key, value);
+    if (!stored) {
+      storageBlocked = true;
+      return false;
+    }
+
+    memoryStore.set(key, value);
+    return true;
+  } catch (error) {
+    storageBlocked = true;
+    console.warn(`secureTabStorage: falha ao salvar "${key}".`, error);
+    return false;
+  }
 };
 
 const removeItem = (key: string): void => {
@@ -24,4 +42,5 @@ export const secureTabStorage = {
   getItem,
   setItem,
   removeItem,
+  isBlocked: () => storageBlocked,
 };
