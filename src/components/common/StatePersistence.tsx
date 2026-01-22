@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { safeStorage } from '@/utils/safeStorage';
+import { secureTabStorage } from '@/utils/secureTabStorage';
 
 /**
  * Componente para prevenir perda de estado quando o app é minimizado no mobile
@@ -12,8 +12,8 @@ export function StatePersistence({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Restaurar posição de scroll e rota ao montar
-    const savedRoute = safeStorage.getItem('app_last_route');
-    const savedScrollY = safeStorage.getItem('app_scroll_y');
+    const savedRoute = secureTabStorage.getItem('app_last_route');
+    const savedScrollY = secureTabStorage.getItem('app_scroll_y');
 
     if (savedRoute && savedRoute !== location.pathname) {
       // Restaurar rota anterior
@@ -28,15 +28,15 @@ export function StatePersistence({ children }: { children: React.ReactNode }) {
     }
 
     // Limpar dados salvos após restaurar
-    safeStorage.removeItem('app_last_route');
-    safeStorage.removeItem('app_scroll_y');
+    secureTabStorage.removeItem('app_last_route');
+    secureTabStorage.removeItem('app_scroll_y');
   }, []);
 
   useEffect(() => {
     // Salvar rota atual quando mudar
     const saveCurrentState = () => {
-      safeStorage.setItem('app_last_route', location.pathname);
-      safeStorage.setItem('app_scroll_y', window.scrollY.toString());
+      secureTabStorage.setItem('app_last_route', location.pathname);
+      secureTabStorage.setItem('app_scroll_y', window.scrollY.toString());
     };
 
     // Salvar estado quando a página ficar invisível (minimizar app)
