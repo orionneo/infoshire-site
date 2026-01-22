@@ -163,8 +163,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const init = async () => {
       try {
-        // ✅ evita sessão “meio vencida” após background/tab switch
-        if (document.visibilityState !== 'visible') return;
         await ensureFreshSession(60);
 
         const { data } = await retryOnceOnAbort(async () => await supabase.auth.getSession());
@@ -205,7 +203,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         if (sessionUser) {
-          if (document.visibilityState !== 'visible') return;
           await ensureFreshSession(60);
           ensureProfileInFlight.current ??= ensureProfile(sessionUser);
           const p = await ensureProfileInFlight.current;

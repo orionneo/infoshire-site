@@ -18,8 +18,6 @@ import { installAutoSyncListeners } from '@/utils/autoSync';
 function AppShell() {
   const location = useLocation();
   const autoSyncCleanupRef = useRef<null | (() => void)>(null);
-  const isAdminRoute = () =>
-    location.hash.startsWith('#/admin');
   const isAdminRoute =
     location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
 
@@ -27,11 +25,10 @@ function AppShell() {
   const showConnectionStatus = location.pathname.startsWith('/client') && !isAdminRoute;
 
   useEffect(() => {
-    // 🚫 Admin NÃO usa fila offline e esse drain em "visibilitychange" pode gerar lock/AbortError no Supabase Auth
+    // 🚫 Admin NÃO usa fila offline nem listeners de lifecycle
     if (isAdminRoute) return;
 
     const drain = () => {
-      // não bloqueia UI, só tenta sincronizar
       void processOfflineQueue();
     };
 
@@ -41,33 +38,19 @@ function AppShell() {
     };
 
     const onFocus = () => {
-      // desktop/alguns browsers
       drain();
     };
 
     const onVisibility = () => {
-      // PWA/mobile: mais confiável que focus
       if (document.visibilityState === 'visible') {
         drain();
       }
     };
 
-  return () => {
-    window.removeEventListener('online', onOnline);
-    window.removeEventListener('focus', onFocus);
-    document.removeEventListener('visibilitychange', onVisibility);
-    window.clearTimeout(t);
-  };
-}, [location.hash]);
-
-  useEffect(() => {
-    const shouldEnable = () =>
-      !window.location.hash.startsWith('#/admin');
     window.addEventListener('online', onOnline);
     window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
 
-    // Também processa ao abrir o site (leve atraso pra não competir com mount/auth)
     const t = window.setTimeout(() => drain(), 1500);
 
     return () => {
