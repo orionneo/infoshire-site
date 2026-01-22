@@ -265,7 +265,8 @@ export async function createClientProfile(clientData: {
   timeoutMs?: number;
   abortSignal?: AbortSignal;
 }): Promise<Profile> {
-  const timeoutMs = clientData.timeoutMs ?? 15000;
+  const defaultTimeoutMs = 15000;
+  const timeoutMs = Math.max(clientData.timeoutMs ?? defaultTimeoutMs, defaultTimeoutMs);
   const abortSignal = clientData.abortSignal;
 
   if (abortSignal?.aborted) {
