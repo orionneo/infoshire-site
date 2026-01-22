@@ -314,7 +314,7 @@ function createAbortableSupabaseClient(signal: AbortSignal, accessToken?: string
  * Gera um número de OS sem depender de RPC (evita travas/timeouts).
  * Formato: OS-YYYYMMDD-HHMM-XXXX
  */
-function generateOrderNumber() {
+export function generateOrderNumber() {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
   const y = d.getFullYear();
@@ -365,6 +365,7 @@ export async function createServiceOrder(
     problem_description: string;
     estimated_completion?: string;
     has_multiple_items?: boolean;
+    order_number?: string;
     items?: Array<{
       equipment: string;
       serial_number?: string;
@@ -394,7 +395,7 @@ export async function createServiceOrder(
     throw new Error('Sem internet. Conecte e tente novamente.');
   }
 
-  const order_number = generateOrderNumber();
+  const order_number = order.order_number ?? generateOrderNumber();
 
   const payload: Partial<ServiceOrder> & {
     order_number: string;
@@ -497,6 +498,17 @@ export async function createServiceOrder(
   }
 
   return created;
+}
+
+export async function getServiceOrderByOrderNumber(orderNumber: string): Promise<ServiceOrder | null> {
+  const { data, error } = await supabase
+    .from('service_orders')
+    .select('*')
+    .eq('order_number', orderNumber)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
 }
 
 

@@ -21,7 +21,15 @@ import { Separator } from '@/components/ui/separator';
 import { SmartInput } from '@/components/ui/SmartInput';
 import { SmartTextarea } from '@/components/ui/SmartTextarea';
 import { Textarea } from '@/components/ui/textarea';
-import { createClientProfile, createServiceOrder, getAllProfiles, getAllServiceOrders, uploadOrderImage } from '@/db/api';
+import {
+  createClientProfile,
+  createServiceOrder,
+  generateOrderNumber,
+  getAllProfiles,
+  getAllServiceOrders,
+  getServiceOrderByOrderNumber,
+  uploadOrderImage,
+} from '@/db/api';
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
 import { useToast } from '@/hooks/use-toast';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
@@ -474,6 +482,8 @@ const handleConfirmOrder = async () => {
   document.addEventListener('visibilitychange', handleVisibilityChange);
   window.addEventListener('pagehide', handlePageHide);
 
+  const orderNumber = generateOrderNumber();
+
   try {
     let clientId = data.client_id;
 
@@ -495,6 +505,7 @@ const handleConfirmOrder = async () => {
         serial_number: data.serial_number,
         problem_description: data.problem_description,
         has_multiple_items: hasMultipleItems,
+        order_number: orderNumber,
         items: hasMultipleItems
           ? additionalItems.map((it) => ({
               equipment: it.equipment,
@@ -542,7 +553,37 @@ const handleConfirmOrder = async () => {
   } catch (err: any) {
     console.error('❌ Falha ao criar OS:', err);
 
-    if (!didAbortFromVisibility && err?.name !== 'AbortError') {
+    let recovered = false;
+    if (!didAbortFromVisibility && err?.name !== 'AbortError' && orderNumber) {
+      try {
+        const existingOrder = await getServiceOrderByOrderNumber(orderNumber);
+        if (existingOrder) {
+          recovered = true;
+          toast({
+            title: 'Ordem criada',
+            description: `OS ${existingOrder.order_number || existingOrder.id}`,
+          });
+
+          sessionStorage.removeItem(FORM_DRAFT_KEY);
+          sessionStorage.removeItem('ORDER_DRAFT_FALLBACK');
+
+          setShowConfirmation(false);
+          setDialogOpen(false);
+          form.reset();
+          setIsNewClient(false);
+          setHasMultipleItems(false);
+          setAdditionalItems([]);
+          setSelectedImages([]);
+          setPendingOrderData(null);
+
+          await loadData();
+        }
+      } catch (lookupError) {
+        console.warn('Falha ao buscar OS por order_number:', lookupError);
+      }
+    }
+
+    if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError') {
       toast({
         title: 'Erro ao criar OS',
         description:
@@ -553,8 +594,10 @@ const handleConfirmOrder = async () => {
       });
     }
 
-    // mantém rascunho do form (não apaga)
-    sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+    if (!recovered) {
+      // mantém rascunho do form (não apaga)
+      sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+    }
   } finally {
     clearTimeout(watchdog);
     document.removeEventListener('visibilitychange', handleVisibilityChange);
