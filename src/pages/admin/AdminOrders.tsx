@@ -514,16 +514,6 @@ export default function AdminOrders() {
     setPendingOrderData(data);
     pendingOrderRef.current = data;
 
-    const hasFreshSession = await ensureFreshSession();
-    if (!hasFreshSession) {
-      toast({
-        title: 'Sessão expirada',
-        description: 'Faça login novamente para continuar.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const startedAt = Date.now();
     setCreating(true);
