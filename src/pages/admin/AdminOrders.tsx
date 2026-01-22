@@ -353,7 +353,33 @@ const handleConfirmOrder = async () => {
   if (!pendingOrderData) return;
 
   const data = pendingOrderData;
+
+  const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const startedAt = Date.now();
+
   setCreating(true);
+
+  // ✅ Watchdog: se a aba dormir e a Promise nunca resolver, a UI NÃO fica presa
+  const WATCHDOG_MS = 20000; // 20s (ajuste se quiser 15s)
+  const watchdog = window.setTimeout(async () => {
+    const elapsed = Date.now() - startedAt;
+    console.warn('[OS]', opId, 'WATCHDOG fired', { elapsed, vis: document.visibilityState });
+
+    try {
+      // tenta atualizar painel (se a OS tiver sido criada no backend, pode aparecer aqui)
+      await loadData();
+    } catch (e) {
+      console.warn('[OS]', opId, 'WATCHDOG loadData failed', e);
+    } finally {
+      setCreating(false);
+      toast({
+        title: 'Criação pausou em background',
+        description:
+          'Você trocou de aba e o navegador pode ter pausado a requisição. Recarreguei a lista; se a OS foi criada, ela vai aparecer. Se não aparecer, tente criar novamente.',
+        variant: 'destructive',
+      });
+    }
+  }, WATCHDOG_MS);
 
   try {
     let clientId = data.client_id;
@@ -368,66 +394,25 @@ const handleConfirmOrder = async () => {
       clientId = newClient.id;
     }
 
-
-
-  // ✅ Criação de OS precisa ser "fail-fast" no admin.
-  // Em PWA/mobile, ao trocar de aba a rede pode pausar e a Promise pode ficar pendurada.
-  // Então: (1) timeout do Supabase (15s) + (2) hard-timeout baseado em relógio real, validado ao voltar para a aba.
-  const HARD_TIMEOUT_MS = 20000;
-  const startedAt = Date.now();
-
-  const op = createServiceOrder(
-    {
-      client_id: clientId,
-      entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
-      equipment: data.equipment,
-      serial_number: data.serial_number,
-      problem_description: data.problem_description,
-      has_multiple_items: hasMultipleItems,
-      items: hasMultipleItems
-        ? additionalItems.map((it) => ({
-            equipment: it.equipment,
-            serial_number: it.serial_number || undefined,
-            description: it.description || undefined,
-          }))
-        : undefined,
-    },
-    { allowOfflineQueue: false, timeoutMs: 15000 } // ✅ 15s é o máximo aceitável para UX no admin
-  );
-
-  const hardTimeout = new Promise<never>((_, reject) => {
-    const check = () => {
-      const elapsed = Date.now() - startedAt;
-      if (elapsed >= HARD_TIMEOUT_MS) {
-        reject(new Error('Criação da OS demorou demais (timeout). Se a OS tiver sido criada, ela aparecerá na lista ao recarregar.'));
-        return;
-      }
-      // timers podem ser throttled em background; então só checamos enquanto VISÍVEL
-      if (document.visibilityState === 'visible') setTimeout(check, 500);
-    };
-
-    // ao voltar para a aba, revalida imediatamente
-    const onVis = () => {
-      if (document.visibilityState === 'visible') {
-        const elapsed = Date.now() - startedAt;
-        if (elapsed >= HARD_TIMEOUT_MS) reject(new Error('Criação da OS pausou ao trocar de aba (timeout). Recarregue a lista para verificar se foi criada.'));
-        else setTimeout(check, 0);
-      }
-    };
-
-    document.addEventListener('visibilitychange', onVis, { once: true });
-    setTimeout(check, 500);
-  });
-
-  let order: any;
-  try {
-    order = await Promise.race([op, hardTimeout]);
-  } catch (e) {
-    // tentativa de "auto-heal": recarrega lista, porque a OS pode ter sido criada no backend
-    try { await loadData(); } catch {}
-    throw e;
-  }
-
+    const order = await createServiceOrder(
+      {
+        client_id: clientId,
+        entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
+        equipment: data.equipment,
+        serial_number: data.serial_number,
+        problem_description: data.problem_description,
+        has_multiple_items: hasMultipleItems,
+        items: hasMultipleItems
+          ? additionalItems.map((it) => ({
+              equipment: it.equipment,
+              serial_number: it.serial_number || undefined,
+              description: it.description || undefined,
+            }))
+          : undefined,
+      },
+      // ✅ ADMIN: timeout curto + vis-aware (NÃO 60s)
+      { allowOfflineQueue: false, timeoutMs: 15000 }
+    );
 
     // ✅ Upload de imagens: não “quebra” a criação se falhar upload
     if (selectedImages.length > 0) {
@@ -460,12 +445,10 @@ const handleConfirmOrder = async () => {
     setSelectedImages([]);
     setPendingOrderData(null);
 
-    loadData();
+    await loadData(); // ✅ aqui é melhor await
   } catch (err: any) {
     console.error('❌ Falha ao criar OS:', err);
 
-    // ✅ Admin NÃO entra em "modo offline/queue" por timeout
-    // Mostra erro real e mantém draft pra tentar novamente
     toast({
       title: 'Erro ao criar OS',
       description:
@@ -478,6 +461,7 @@ const handleConfirmOrder = async () => {
     // mantém rascunho do form (não apaga)
     sessionStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
   } finally {
+    clearTimeout(watchdog);
     setCreating(false);
   }
 };
