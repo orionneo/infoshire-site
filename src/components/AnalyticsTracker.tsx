@@ -7,6 +7,9 @@ const ANALYTICS_ENABLED = String(import.meta.env.VITE_ANALYTICS_ENABLED || 'true
 
 export function AnalyticsTracker() {
   const location = useLocation();
+
+  // ✅ Nunca rodar analytics no admin
+  if (location.pathname.startsWith('/admin')) return null;
   const initialized = useRef(false);
 
   const isPrivateRoute =

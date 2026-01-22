@@ -1,6 +1,16 @@
 // src/utils/autoSync.ts
 import { supabase } from '@/db/supabase';
 
+function isAdminRoute(): boolean {
+  try {
+    const hash = window.location.hash || '';
+    if (hash.startsWith('#/')) return hash.slice(1).startsWith('/admin');
+    return (window.location.pathname || '').startsWith('/admin');
+  } catch {
+    return false;
+  }
+}
+
 export type SyncStatus = {
   // legacy fields (o SyncStatusBadge espera isso)
   online: boolean;
@@ -47,12 +57,7 @@ export async function runAutoSync(reason: string = 'autoSync'): Promise<void> {
   status.lastReason = reason;
   status.lastError = null;
   emit();
-const isAdminRoute = () => {
-  const h = window.location.hash || '';
-  return h.startsWith('#/admin');
-};
 
-if (isAdminRoute()) return; // ✅ admin não faz autosync automático
   try {
     const { data: sessionData, error: sessErr } = await supabase.auth.getSession();
     if (sessErr) throw sessErr;
