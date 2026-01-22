@@ -644,6 +644,7 @@ export default function AdminOrders() {
       if (!recovered) {
         // mantém rascunho do form (não apaga)
         secureTabStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+      }
       if (!recovered && !didAbortFromVisibility && err?.name !== 'AbortError' && !creatingSessionRef.current?.resolved) {
         finalizeCreationError(
           err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
