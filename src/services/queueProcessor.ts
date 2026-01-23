@@ -136,13 +136,24 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
  * Chamado imediatamente ao voltar (focus, online, visibilitychange)
  */
 export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
-  const { reason, maxRetries = 5 } = opts;
+  const { reason } = opts;
 
-  // Debounce: não processar muito frequentemente
+  // ✅ SURGICAL FIX: focus, visibility, user_click devem processar IMEDIATAMENTE
+  // Apenas interval/app_start/online respeitam throttle
+  const needsImmediateProcess = ['focus', 'visibility', 'user_click'].includes(reason);
   const now = Date.now();
-  if (now - lastProcessTime < MIN_PROCESS_INTERVAL) {
-    console.log(`[QueueProcessor] Skipping (too soon, reason: ${reason})`);
-    return;
+  
+  if (!needsImmediateProcess) {
+    // Debounce: não processar muito frequentemente (para interval/online)
+    if (now - lastProcessTime < MIN_PROCESS_INTERVAL) {
+      console.log(`[QueueProcessor] Skipping throttle (too soon, reason: ${reason})`);
+      await logDebug('queue_processor_throttled', { reason });
+      return;
+    }
+  } else {
+    // Focus/visibility/user_click: log que foi processado sem throttle
+    console.info(`[QueueProcessor] 🚀 IMMEDIATE PROCESS (NO THROTTLE): reason=${reason}`);
+    await logDebug('queue_processor_immediate', { reason });
   }
 
   if (processingInProgress) {
