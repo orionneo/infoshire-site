@@ -526,6 +526,36 @@ export default function AdminOrders() {
       opId,
       resolved: false,
     };
+
+    // ✅ CRITICAL FIX: Hard timeout (30 seconds) with automatic cleanup
+    // This prevents "Criando..." from hanging indefinitely when app backgrounded
+    const timeoutHandle = window.setTimeout(() => {
+      if (!creatingSessionRef.current?.resolved) {
+        console.warn(`⏱️ Order creation timeout (${opId}). Checking backend...`);
+        // Mark as resolved to prevent multiple completions
+        if (creatingSessionRef.current) {
+          creatingSessionRef.current.resolved = true;
+        }
+        setCreating(false);
+
+        // Attempt recovery: check if order was created on backend
+        getServiceOrderByOrderNumber(orderNumber)
+          .then((existingOrder) => {
+            if (existingOrder) {
+              console.log(`✅ Order recovered from backend: ${orderNumber}`);
+              finalizeCreationSuccess(existingOrder, 'recuperado (timeout)');
+            } else {
+              console.warn(`❌ Order not found after timeout: ${orderNumber}`);
+              finalizeCreationError('Timeout ao criar OS. Verifique sua conexão e tente novamente.');
+            }
+          })
+          .catch((err) => {
+            console.error('Erro ao recuperar OS após timeout:', err);
+            finalizeCreationError('Timeout ao criar OS. Verifique sua conexão e tente novamente.');
+          });
+      }
+    }, 30000);
+
     try {
       let clientId = data.client_id;
 
@@ -666,6 +696,9 @@ export default function AdminOrders() {
         );
       }
     } finally {
+      // ✅ Clean up hard timeout
+      window.clearTimeout(timeoutHandle);
+
       if (!creatingSessionRef.current?.resolved) {
         setCreating(false);
       }
