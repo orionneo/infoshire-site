@@ -15,35 +15,7 @@ function currentRoutePath(location: { pathname: string; hash?: string }): string
 }
 
 export function AnalyticsTracker() {
-  const location = useLocation();
-  const path = currentRoutePath(location);
-
-  // 🚫 CRITICAL: Never run analytics in admin - check both hash and pathname
-  const isAdminRoute = path.startsWith('/admin') || location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
-  if (isAdminRoute) return null;
-  const initialized = useRef(false);
-
-  const enabled = ANALYTICS_ENABLED && shouldRunAnalytics();
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    if (!initialized.current) {
-      trackSessionStart().catch(() => {});
-      setupClickTracking();
-      initialized.current = true;
-    }
-  }, [enabled]);
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    const timer = setTimeout(() => {
-      trackPageView(path, document.title || path).catch(() => {});
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [path, enabled]);
-
+  // 🚫 ANALYTICS COMPLETELY DISABLED - causing redirect loops and RLS violations
+  // No analytics should run - comment out all tracking
   return null;
 }
