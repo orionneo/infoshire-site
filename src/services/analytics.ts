@@ -95,10 +95,14 @@ const NO_ANALYTICS_PREFIXES = [
 
 /**
  * Decide se deve rodar analytics nesta rota/ambiente.
+ * 🚫 CRITICAL: Admin routes must NEVER run analytics
  */
 export function shouldRunAnalytics(): boolean {
   try {
     const path = currentRoutePath();
+    // Admin routes - NEVER run analytics
+    if (path.startsWith('/admin') || path === '/admin' || path.includes('admin')) return false;
+    // Check all NO_ANALYTICS prefixes
     if (NO_ANALYTICS_PREFIXES.some((p) => path.startsWith(p))) return false;
   } catch {
     // ignore
@@ -280,14 +284,9 @@ export async function trackSessionStart(): Promise<boolean> {
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
 
-    // ✅ se não tiver sessão auth, continue mesmo assim (para usuarios anônimos)
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData?.session?.user?.id || null;
-
     const { error: sessionError } = await supabase.from('analytics_sessions').insert({
       session_id: sessionId,
       visitor_id: visitorId,
-      user_id: userId,
       first_visit: new Date().toISOString(),
       last_activity: new Date().toISOString(),
       page_count: 1,
@@ -368,9 +367,6 @@ export async function trackPageView(path: string, title: string): Promise<boolea
     if (!shouldRunAnalytics()) return false;
     if (!navigator.onLine) return false;
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData?.session?.user?.id || null;
-
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
 
@@ -383,7 +379,6 @@ export async function trackPageView(path: string, title: string): Promise<boolea
         {
           session_id: sessionId,
           visitor_id: visitorId,
-          user_id: userId,
           page_path: path,
           page_title: title,
           time_on_page: 0,
