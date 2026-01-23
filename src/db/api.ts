@@ -238,14 +238,23 @@ export async function createServiceOrder(
    * ✅ Fluxo esperado:
    * - Cria a OS online sem cancelamento por lifecycle para evitar travas no Admin.
    */
-  // ✅ 1) Cria a OS online - SEM select() desnecessário
+  // ✅ 1) Cria a OS online - insert APENAS (sem select que causa timeout)
   let inserted: any;
   try {
-    inserted = await supabase.from('service_orders').insert(payload).select().single();
+    // ❌ REMOVIDO: .select().single() causava timeout
+    // Insert já retorna com status 201 quando sucesso
+    const result = await supabase.from('service_orders').insert(payload);
+    if (result.error) throw result.error;
+    
+    // Se chegou aqui, insert foi sucesso!
+    // Supabase gerou o UUID e criou a ordem
+    // Retornamos os dados do payload que é exatamente o que foi inserido
+    inserted = {
+      data: payload,
+      error: null
+    };
   } catch (e: any) {
-    // ❌ NÃO tenta buscar em catch - Firefox Tracking Prevention bloqueia
-    // A OS pode ter sido criada (check será feito no AdminOrders.tsx depois)
-    console.warn(`[createServiceOrder] Insert falhou (pode estar criado):`, e);
+    console.warn(`[createServiceOrder] Insert falhou:`, e);
     throw e;
   }
 
