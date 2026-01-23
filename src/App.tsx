@@ -85,35 +85,11 @@ function AppShell() {
 
   return (
     <AuthProvider>
-      {/* ✅ StatePersistence disabled for admin routes to prevent redirect loops on visibility change */}
-      {!isAdminRoute ? (
-        <StatePersistence>
-          <RouteGuard>
-            <ScrollToTop />
-            <IntersectObserver />
-            <AnalyticsTracker />
-            <GlobalGamerBackground />
-
-            <div className="flex flex-col min-h-screen relative z-10">
-              <main className="flex-grow">
-                <Routes>
-                  {routes.map((route, index) => (
-                    <Route key={index} path={route.path} element={route.element} />
-                  ))}
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </main>
-            </div>
-
-            <PWAInstallPrompt />
-            {showConnectionStatus ? <ConnectionStatus enabled failThreshold={3} /> : null}
-            <Toaster />
-          </RouteGuard>
-        </StatePersistence>
-      ) : (
+      <StatePersistence>
         <RouteGuard>
           <ScrollToTop />
           <IntersectObserver />
+          {!isAdminRoute && <AnalyticsTracker />}
           <GlobalGamerBackground />
 
           <div className="flex flex-col min-h-screen relative z-10">
@@ -128,9 +104,10 @@ function AppShell() {
           </div>
 
           <PWAInstallPrompt />
+          {showConnectionStatus ? <ConnectionStatus enabled failThreshold={3} /> : null}
           <Toaster />
         </RouteGuard>
-      )}
+      </StatePersistence>
     </AuthProvider>
   );
 }
