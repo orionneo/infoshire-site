@@ -183,16 +183,16 @@ export default function AdminOrders() {
     }
   }, [location.state, navigate, location.pathname]);
 
-  // Auto-salvar formulário a cada mudança
+  // Auto-salvar formulário a cada mudança (APENAS se não estiver criando e storage disponível)
   useEffect(() => {
-    if (!dialogOpen || !tabStorageEnabled) return;
+    if (!dialogOpen || !tabStorageEnabled || creating) return; // 🔥 Nunca salvar durante criação
 
     const subscription = form.watch((values) => {
       saveTabStorageItem(FORM_DRAFT_KEY, JSON.stringify(values));
     });
 
     return () => subscription.unsubscribe();
-  }, [dialogOpen, form, saveTabStorageItem, tabStorageEnabled]);
+  }, [dialogOpen, form, saveTabStorageItem, tabStorageEnabled, creating]);
 
   const loadData = useCallback(async () => {
     try {
@@ -213,7 +213,7 @@ export default function AdminOrders() {
       const cache = loadAdminCache();
       if (cache) {
         setOrders(cache.orders);
-        setClients(cache.clients.filter((c) => c.role === 'client'));
+        setClients(cache.clients.filter((c: any) => c.role === 'client'));
         toast({
           title: 'Modo offline',
           description: 'Carreguei dados do cache local. Novas OS/imagens serão sincronizadas ao voltar a conexão.',
@@ -485,10 +485,15 @@ export default function AdminOrders() {
     // Todas as validações passaram - mostrar confirmação
     setPendingOrderData(data);
     pendingOrderRef.current = data;
-    if (!saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data))) {
-      return;
+    // ⚠️ Não depender de storage - apenas usar memória (pendingOrderRef)
+    // Storage é bloqueado por Firefox Tracking Prevention quando aba backgroundada
+    try {
+      saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+      saveTabStorageItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('Storage blocked during validation (continuing):', e);
+      // Continua mesmo se storage falhar - dados estão em memory
     }
-    saveTabStorageItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
     setShowConfirmation(true);
   };
 
@@ -518,8 +523,8 @@ export default function AdminOrders() {
     const startedAt = Date.now();
     setCreating(true);
     const orderNumber = generateOrderNumber();
-    const snapshot = { ...data, order_number: orderNumber };
-    saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(snapshot));
+    // ⚠️ NÃO salvar em storage durante criação - Firefox bloqueia quando aba backgroundada
+    // Usar APENAS memória (creatingSessionRef) como fallback
     creatingSessionRef.current = {
       orderNumber,
       startedAt,
@@ -527,8 +532,8 @@ export default function AdminOrders() {
       resolved: false,
     };
 
-    // ✅ CRITICAL FIX: Hard timeout (30 seconds) with automatic cleanup
-    // This prevents "Criando..." from hanging indefinitely when app backgrounded
+    // ✅ CRITICAL FIX: Hard timeout (30 seconds) com recuperação automática
+    // Previne que "Criando..." fique preso indefinidamente (sem depender de storage)
     const timeoutHandle = window.setTimeout(() => {
       if (!creatingSessionRef.current?.resolved) {
         console.warn(`⏱️ Order creation timeout (${opId}). Checking backend...`);
@@ -613,10 +618,15 @@ export default function AdminOrders() {
         description: `OS ${order.order_number || order.id}`,
       });
 
-      // ✅ limpa drafts e fecha diálogos
-      secureTabStorage.removeItem(FORM_DRAFT_KEY);
-      secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+      // ✅ limpa drafts e fecha diálogos (ignora storage errors - admin deve funcionar sem storage)
+      try {
+        secureTabStorage.removeItem(FORM_DRAFT_KEY);
+        secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
+        secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+      } catch (e) {
+        // Ignora erro de storage - admin não pode depender disso
+        if (import.meta.env.DEV) console.warn('Storage cleanup error (ignored):', e);
+      }
 
       setShowConfirmation(false);
       setDialogOpen(false);
@@ -650,9 +660,14 @@ export default function AdminOrders() {
               description: `OS ${existingOrder.order_number || existingOrder.id}`,
             });
 
-            secureTabStorage.removeItem(FORM_DRAFT_KEY);
-            secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-            secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+            // ✅ Try to cleanup storage, but don't fail if blocked
+            try {
+              secureTabStorage.removeItem(FORM_DRAFT_KEY);
+              secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
+              secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+            } catch (e) {
+              if (import.meta.env.DEV) console.warn('Storage cleanup error (ignored):', e);
+            }
 
             setShowConfirmation(false);
             setDialogOpen(false);
@@ -685,8 +700,13 @@ export default function AdminOrders() {
       }
 
       if (!recovered) {
-        // mantém rascunho do form (não apaga)
-        saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        // ✅ Try to save draft, but don't fail if storage is blocked
+        try {
+          saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
+        } catch (e) {
+          if (import.meta.env.DEV) console.warn('Cannot save draft to storage (ignored):', e);
+          // Mantém dados em memory via pendingOrderRef.current
+        }
       }
       if (!recovered && err?.name !== 'AbortError' && !creatingSessionRef.current?.resolved) {
         finalizeCreationError(
