@@ -34,6 +34,9 @@ import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
 import { safeStorage } from '@/utils/safeStorage';
 import { secureTabStorage } from '@/utils/secureTabStorage';
 import { useToast } from '@/hooks/use-toast';
+import { createPendingOp, getPendingOpsDB } from '@/services/pendingOps';
+import { processPendingQueue, setupQueueProcessing } from '@/services/queueProcessor';
+import { logDebug } from '@/services/debugLogger';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
 
 // Chave para salvar o rascunho do formulário
@@ -533,6 +536,7 @@ export default function AdminOrders() {
     setShowConfirmation(true);
   };
 
+
   const handleConfirmOrder = async () => {
     if (import.meta.env.DEV) {
       console.info('[ADMIN][OS] confirm click');
@@ -556,45 +560,11 @@ export default function AdminOrders() {
     pendingOrderRef.current = data;
 
     const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-    const startedAt = Date.now();
-    setCreating(true);
     const orderNumber = generateOrderNumber();
     
-    // ✅ Criar AbortController para controlar a requisição
-    const controller = new AbortController();
+    // ✅ OFFLINE-FIRST: Enfileirar operação no IndexedDB ANTES de enviar
+    await logDebug('enqueue_start', { opId, orderNumber });
     
-    // ⚠️ NÃO salvar em storage durante criação - Firefox bloqueia quando aba backgroundada
-    // Usar APENAS memória (creatingSessionRef) como fallback
-    creatingSessionRef.current = {
-      orderNumber,
-      startedAt,
-      opId,
-      resolved: false,
-    };
-
-    // ✅ CRITICAL FIX: Hard timeout (60 seconds) - SIMPLE and ROBUST
-    // Conectar timeout ao AbortController
-    // Firefox blocks everything when tab is backgrounded for 15s+
-    console.log(`[AdminOrders] Starting order creation with 60s timeout (opId: ${opId})`);
-    const timeoutHandle = window.setTimeout(() => {
-      if (!creatingSessionRef.current?.resolved) {
-        console.warn(`⏱️ Order creation timeout AFTER 60s (${opId}). Aborting request...`);
-        if (creatingSessionRef.current) {
-          creatingSessionRef.current.resolved = true;
-        }
-        // ✅ Abortar a requisição
-        controller.abort();
-        // ✅ IMMEDIATELY release the UI - user can try again
-        setCreating(false);
-        // Simple message - user will know timeout occurred
-        toast({
-          title: 'Criação demorou muito',
-          description: 'Verifique sua conexão. Tente criar a ordem novamente se não vir na lista.',
-          variant: 'destructive',
-        });
-      }
-    }, 60000);
-
     try {
       let clientId = data.client_id;
 
@@ -611,156 +581,76 @@ export default function AdminOrders() {
         clientId = newClient.id;
       }
 
-      if (import.meta.env.DEV) {
-        console.info('[ADMIN][OS] calling createServiceOrder', { orderNumber });
-      }
-      console.log(`[AdminOrders] 🚀 START createServiceOrder call (opId: ${opId}, orderNum: ${orderNumber})`);
-      const order = await createServiceOrder(
-        {
-          client_id: clientId,
-          entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
-          equipment: data.equipment,
-          serial_number: data.serial_number,
-          problem_description: data.problem_description,
-          has_multiple_items: hasMultipleItems,
-          order_number: orderNumber,
-          items: hasMultipleItems
-            ? additionalItems.map((it) => ({
-                equipment: it.equipment,
-                serial_number: it.serial_number || undefined,
-                description: it.description || undefined,
-              }))
-            : undefined,
-        },
-        { signal: controller.signal }
-      );
-      if (import.meta.env.DEV) {
-        console.info('[ADMIN][OS] createServiceOrder resolved', { orderId: order.id });
-      }
+      // ✅ PREPARAR payload da operação
+      const payload = {
+        client_id: clientId,
+        entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
+        equipment: data.equipment,
+        serial_number: data.serial_number,
+        problem_description: data.problem_description,
+        has_multiple_items: hasMultipleItems,
+        order_number: orderNumber,
+        items: hasMultipleItems
+          ? additionalItems.map((it) => ({
+              equipment: it.equipment,
+              serial_number: it.serial_number || undefined,
+              description: it.description || undefined,
+            }))
+          : undefined,
+        selectedImages: selectedImages,
+      };
 
-      // ✅ Upload de imagens: não “quebra” a criação se falhar upload
-      if (selectedImages.length > 0) {
-        for (const file of selectedImages) {
-          try {
-            await uploadOrderImage(order.id, file);
-          } catch (e) {
-            console.warn('Upload falhou (não bloqueia OS):', e);
-          }
-        }
-      }
+      // ✅ ENFILEIRAR no IndexedDB
+      await createPendingOp(opId, orderNumber, payload);
+      await logDebug('enqueue_done', { opId, orderNumber });
 
+      // ✅ IMPERCEPTÍVEL: Toast não-bloqueante, não mostra "Criando..."
       toast({
-        title: 'Ordem criada',
-        description: `OS ${order.order_number || order.id}`,
+        title: 'OS em envio',
+        description: 'Sua ordem está sendo criada. Pode trocar de aba sem problema.',
       });
 
-      // ✅ limpa drafts e fecha diálogos (ignora storage errors - admin deve funcionar sem storage)
+      // ✅ Limpar drafts e fechar diálogos (ignora storage errors)
       try {
         secureTabStorage.removeItem(FORM_DRAFT_KEY);
         secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
         secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
       } catch (e) {
-        // Ignora erro de storage - admin não pode depender disso
         if (import.meta.env.DEV) console.warn('Storage cleanup error (ignored):', e);
       }
 
+      // ✅ Reset total do estado (ANTES de processar)
       setShowConfirmation(false);
       setDialogOpen(false);
-
-      // ✅ reset total do estado
       form.reset();
       setIsNewClient(false);
       setHasMultipleItems(false);
       setAdditionalItems([]);
       setSelectedImages([]);
       setPendingOrderData(null);
-      if (creatingSessionRef.current?.resolved) {
-        return;
-      }
+      setCreating(false);
 
-      await finalizeCreationSuccess(order, '');
+      // ✅ DISPARAR processamento imediatamente (não-bloqueante)
+      console.log(`[AdminOrders] 🚀 ENQUEUED ${opId}, triggering queue processing...`);
+      processPendingQueue({ reason: 'user_click' }).catch((err) => {
+        console.error('Queue processor error:', err);
+        logDebug('process_error', { opId, error: String(err) });
+      });
     } catch (err: any) {
-      console.error('❌ Falha ao criar OS:', err);
+      console.error('❌ Falha ao enfileirar OS:', err);
       if (import.meta.env.DEV) {
-        console.info('[ADMIN][OS] createServiceOrder failed', err);
+        console.info('[ADMIN][OS] enqueueing failed', err);
       }
 
-      let recovered = false;
-      if (err?.name !== 'AbortError' && orderNumber) {
-        try {
-          const existingOrder = await getServiceOrderByOrderNumber(orderNumber);
-          if (existingOrder) {
-            recovered = true;
-            toast({
-              title: 'Ordem criada',
-              description: `OS ${existingOrder.order_number || existingOrder.id}`,
-            });
+      await logDebug('enqueue_error', { opId, error: String(err) });
 
-            // ✅ Try to cleanup storage, but don't fail if blocked
-            try {
-              secureTabStorage.removeItem(FORM_DRAFT_KEY);
-              secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-              secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
-            } catch (e) {
-              if (import.meta.env.DEV) console.warn('Storage cleanup error (ignored):', e);
-            }
+      toast({
+        title: 'Erro ao preparar OS',
+        description: err?.message || 'Falha inesperada. Tente novamente.',
+        variant: 'destructive',
+      });
 
-            setShowConfirmation(false);
-            setDialogOpen(false);
-            form.reset();
-            setIsNewClient(false);
-            setHasMultipleItems(false);
-            setAdditionalItems([]);
-            setSelectedImages([]);
-            setPendingOrderData(null);
-
-            // 🚫 REMOVED: await loadData() - causes timeout
-            if (!creatingSessionRef.current?.resolved) {
-              await finalizeCreationSuccess(existingOrder, 'recuperado');
-            }
-          }
-        } catch (lookupError) {
-          console.warn('Falha ao buscar OS por order_number:', lookupError);
-        }
-      }
-
-      if (!recovered && err?.name !== 'AbortError') {
-        toast({
-          title: 'Erro ao criar OS',
-          description:
-            err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
-              ? 'Sem conexão no momento. Verifique internet e tente novamente.'
-              : err?.message || 'Falha inesperada ao criar a OS.',
-          variant: 'destructive',
-        });
-      }
-
-      if (!recovered) {
-        // ✅ Try to save draft, but don't fail if storage is blocked
-        try {
-          saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
-        } catch (e) {
-          if (import.meta.env.DEV) console.warn('Cannot save draft to storage (ignored):', e);
-          // Mantém dados em memory via pendingOrderRef.current
-        }
-      }
-      if (!recovered && err?.name !== 'AbortError' && !creatingSessionRef.current?.resolved) {
-        finalizeCreationError(
-          err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
-            ? 'Sem conexão no momento. Verifique internet e tente novamente.'
-            : err?.message || 'Falha inesperada ao criar a OS.'
-        );
-      }
-    } finally {
-      // ✅ Clean up hard timeout
-      window.clearTimeout(timeoutHandle);
-
-      if (!creatingSessionRef.current?.resolved) {
-        setCreating(false);
-      }
-      if (creatingSessionRef.current?.opId === opId) {
-        creatingSessionRef.current = null;
-      }
+      setCreating(false);
     }
   };
 

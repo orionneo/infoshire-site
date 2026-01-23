@@ -13,6 +13,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import routes from './routes';
 import { processOfflineQueue } from '@/utils/processOfflineQueue';
 import { installAutoSyncListeners } from '@/utils/autoSync';
+import { setupQueueProcessing } from '@/services/queueProcessor';
 
 function AppShell() {
   const location = useLocation();
@@ -81,6 +82,11 @@ function AppShell() {
     };
   }, [isAdminRoute]);
 
+  // ✅ Setup queue processing on app start (called once)
+  useEffect(() => {
+    console.log('[App] Setting up queue processing listeners...');
+    setupQueueProcessing();
+  }, []);
 
   return (
     <AuthProvider>

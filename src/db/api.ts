@@ -254,7 +254,19 @@ export async function createServiceOrder(
       ? await insertQuery.abortSignal(opts.signal)
       : await insertQuery;
     
-    if (result.error) throw result.error;
+    if (result.error) {
+      // ✅ IDEMPOTÊNCIA: Se falhou por unique constraint (order_number já existe)
+      // Trata como sucesso - retorna a ordem existente
+      if (result.error.code === '23505' && order_number) {
+        console.log(`[createServiceOrder] Order ${order_number} already exists (idempotent). Fetching...`);
+        const existing = await getServiceOrderByOrderNumber(order_number);
+        if (existing) {
+          console.log(`[createServiceOrder] ✅ Recovered existing order:`, existing.id);
+          return existing;
+        }
+      }
+      throw result.error;
+    }
     
     // Se chegou aqui, insert foi sucesso!
     // Supabase gerou o UUID e criou a ordem
