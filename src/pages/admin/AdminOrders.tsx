@@ -60,6 +60,27 @@ const dateInputToLocalISOString = (dateStr: string) => {
   return tzAdjusted.toISOString();
 };
 
+const HARD_TIMEOUT_MS = 25000;
+
+const withHardTimeout = async <T,>(promise: Promise<T>, label: string): Promise<T> => {
+  let timeoutId: number | undefined;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      const error = new Error(`Timeout ao ${label}`);
+      (error as Error & { name?: string }).name = 'TimeoutError';
+      reject(error);
+    }, HARD_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+    }
+  }
+};
+
 export default function AdminOrders() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -533,20 +554,23 @@ export default function AdminOrders() {
         if (import.meta.env.DEV) {
           console.info('[ADMIN][OS] creating client profile');
         }
-        const newClient = await createClientProfile({
-          name: `${data.new_client_first_name} ${data.new_client_last_name}`,
-          email: data.new_client_email,
-          phone: data.new_client_phone,
-          password: data.new_client_password,
-        });
+        const newClient = await withHardTimeout(
+          createClientProfile({
+            name: `${data.new_client_first_name} ${data.new_client_last_name}`,
+            email: data.new_client_email,
+            phone: data.new_client_phone,
+            password: data.new_client_password,
+          }),
+          'criar perfil do cliente'
+        );
         clientId = newClient.id;
       }
 
       if (import.meta.env.DEV) {
-        console.info('[ADMIN][OS] calling createServiceOrder', { orderNumber });
+        console.info('[ADMIN][OS] starting create', { orderNumber });
       }
-      const order = await createServiceOrder(
-        {
+      const order = await withHardTimeout(
+        createServiceOrder({
           client_id: clientId,
           entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
           equipment: data.equipment,
@@ -561,17 +585,18 @@ export default function AdminOrders() {
                 description: it.description || undefined,
               }))
             : undefined,
-        }
+        }),
+        'criar OS'
       );
       if (import.meta.env.DEV) {
-        console.info('[ADMIN][OS] createServiceOrder resolved', { orderId: order.id });
+        console.info('[ADMIN][OS] create done', { orderId: order.id });
       }
 
       // ✅ Upload de imagens: não “quebra” a criação se falhar upload
       if (selectedImages.length > 0) {
         for (const file of selectedImages) {
           try {
-            await uploadOrderImage(order.id, file);
+            await withHardTimeout(uploadOrderImage(order.id, file), 'enviar imagem da OS');
           } catch (e) {
             console.warn('Upload falhou (não bloqueia OS):', e);
           }
@@ -606,13 +631,29 @@ export default function AdminOrders() {
     } catch (err: any) {
       console.error('❌ Falha ao criar OS:', err);
       if (import.meta.env.DEV) {
-        console.info('[ADMIN][OS] createServiceOrder failed', err);
+        console.info('[ADMIN][OS] create failed', err);
+      }
+
+      const isTimeout = err?.name === 'TimeoutError';
+
+      if (isTimeout) {
+        if (import.meta.env.DEV) {
+          console.info('[ADMIN][OS] timeout unlock UI');
+        }
+        toast({
+          title: 'Tempo esgotado ao criar OS',
+          description: 'A criação demorou mais do que o esperado. Verifique a conexão e tente novamente.',
+          variant: 'destructive',
+        });
       }
 
       let recovered = false;
       if (err?.name !== 'AbortError' && orderNumber) {
         try {
-          const existingOrder = await getServiceOrderByOrderNumber(orderNumber);
+          const existingOrder = await withHardTimeout(
+            getServiceOrderByOrderNumber(orderNumber),
+            'consultar OS por número'
+          );
           if (existingOrder) {
             recovered = true;
             toast({
@@ -643,7 +684,7 @@ export default function AdminOrders() {
         }
       }
 
-      if (!recovered && err?.name !== 'AbortError') {
+      if (!recovered && err?.name !== 'AbortError' && !isTimeout) {
         toast({
           title: 'Erro ao criar OS',
           description:
@@ -658,7 +699,7 @@ export default function AdminOrders() {
         // mantém rascunho do form (não apaga)
         saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
       }
-      if (!recovered && err?.name !== 'AbortError' && !creatingSessionRef.current?.resolved) {
+      if (!recovered && err?.name !== 'AbortError' && !isTimeout && !creatingSessionRef.current?.resolved) {
         finalizeCreationError(
           err?.message?.includes('Failed to fetch') || err?.name === 'TypeError'
             ? 'Sem conexão no momento. Verifique internet e tente novamente.'
@@ -666,9 +707,10 @@ export default function AdminOrders() {
         );
       }
     } finally {
-      if (!creatingSessionRef.current?.resolved) {
-        setCreating(false);
+      if (import.meta.env.DEV) {
+        console.info('[ADMIN][OS] finally unlock UI');
       }
+      setCreating(false);
       if (creatingSessionRef.current?.opId === opId) {
         creatingSessionRef.current = null;
       }

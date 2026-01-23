@@ -18,11 +18,11 @@ import { installAutoSyncListeners } from '@/utils/autoSync';
 function AppShell() {
   const location = useLocation();
   const autoSyncCleanupRef = useRef<null | (() => void)>(null);
-  const isAdminRoute =
-    location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
+  const currentHash = location.hash || window.location.hash || '';
+  const isAdminRoute = currentHash.startsWith('#/admin');
 
   // Mostra checagem de conexão APENAS em rotas autenticadas
-  const showConnectionStatus = location.pathname.startsWith('/client') && !isAdminRoute;
+  const showConnectionStatus = currentHash.startsWith('#/client') && !isAdminRoute;
 
   useEffect(() => {
     // 🚫 Admin NÃO usa fila offline nem listeners de lifecycle
@@ -87,7 +87,7 @@ function AppShell() {
           <ScrollToTop />
           <IntersectObserver />
           {!isAdminRoute ? <AnalyticsTracker /> : null}
-          <GlobalGamerBackground />
+          {!isAdminRoute ? <GlobalGamerBackground /> : null}
 
           <div className="flex flex-col min-h-screen relative z-10">
             <main className="flex-grow">

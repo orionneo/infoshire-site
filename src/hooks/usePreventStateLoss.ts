@@ -15,6 +15,8 @@ export function usePreventStateLoss<T>(
 ) {
   useEffect(() => {
     if (!enabled) return;
+    const isAdminRoute = (window.location.hash || '').startsWith('#/admin');
+    if (isAdminRoute) return;
 
     // Tentar restaurar estado salvo ao montar o componente
     const savedState = secureTabStorage.getItem(`state_${key}`);

@@ -133,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const navigate = useNavigate();
   const location = useLocation();
+  const isAdminRoute = (location.hash || window.location.hash || '').startsWith('#/admin');
 
   // ✅ evita concorrência (múltiplos ensureProfile ao mesmo tempo)
   const ensureProfileInFlight = useRef<Promise<Profile | null> | null>(null);
@@ -163,7 +164,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const init = async () => {
       try {
-        await ensureFreshSession(60);
+        if (!isAdminRoute) {
+          await ensureFreshSession(60);
+        } else if (import.meta.env.DEV) {
+          console.info('[ADMIN][AUTH] skip ensureFreshSession on init');
+        }
 
         const { data } = await retryOnceOnAbort(async () => await supabase.auth.getSession());
         const sessionUser = data.session?.user ?? null;
@@ -203,7 +208,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         if (sessionUser) {
-          await ensureFreshSession(60);
+          if (!isAdminRoute) {
+            await ensureFreshSession(60);
+          } else if (import.meta.env.DEV) {
+            console.info('[ADMIN][AUTH] skip ensureFreshSession on auth change');
+          }
           ensureProfileInFlight.current ??= ensureProfile(sessionUser);
           const p = await ensureProfileInFlight.current;
           ensureProfileInFlight.current = null;
@@ -220,7 +229,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [isAdminRoute]);
 
   const signInWithUsername = async (username: string, password: string) => {
     try {
