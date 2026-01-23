@@ -280,13 +280,14 @@ export async function trackSessionStart(): Promise<boolean> {
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
 
-    // ✅ se não tiver sessão auth, não tente (evita log spam)
+    // ✅ se não tiver sessão auth, continue mesmo assim (para usuarios anônimos)
     const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData?.session) return false;
+    const userId = sessionData?.session?.user?.id || null;
 
     const { error: sessionError } = await supabase.from('analytics_sessions').insert({
       session_id: sessionId,
       visitor_id: visitorId,
+      user_id: userId,
       first_visit: new Date().toISOString(),
       last_activity: new Date().toISOString(),
       page_count: 1,
@@ -368,7 +369,7 @@ export async function trackPageView(path: string, title: string): Promise<boolea
     if (!navigator.onLine) return false;
 
     const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData?.session) return false;
+    const userId = sessionData?.session?.user?.id || null;
 
     const sessionId = getSessionId();
     const visitorId = getOrCreateVisitorId();
@@ -382,6 +383,7 @@ export async function trackPageView(path: string, title: string): Promise<boolea
         {
           session_id: sessionId,
           visitor_id: visitorId,
+          user_id: userId,
           page_path: path,
           page_title: title,
           time_on_page: 0,
