@@ -7,7 +7,6 @@ import { ScrollToTop } from '@/components/common/ScrollToTop';
 import { StatePersistence } from '@/components/common/StatePersistence';
 import { PWAInstallPrompt } from '@/components/PWAInstallPrompt';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
-import { AnalyticsTracker } from '@/components/AnalyticsTracker';
 import GlobalGamerBackground from '@/components/GlobalGamerBackground';
 import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/contexts/AuthContext';
@@ -89,7 +88,6 @@ function AppShell() {
         <RouteGuard>
           <ScrollToTop />
           <IntersectObserver />
-          {!isAdminRoute && <AnalyticsTracker />}
           <GlobalGamerBackground />
 
           <div className="flex flex-col min-h-screen relative z-10">
