@@ -283,9 +283,11 @@ export default function AdminOrders() {
       }
 
       resetCreationForm();
-      await loadData();
+      // 🚫 REMOVED: await loadData() - causes timeout when tab backgrounded
+      // Order is created in Supabase, user will see it on next page refresh
+      // Don't block UI waiting for data reload
     },
-    [loadData, resetCreationForm, toast]
+    [resetCreationForm, toast]
   );
 
   const finalizeCreationError = useCallback(
@@ -704,7 +706,7 @@ export default function AdminOrders() {
             setSelectedImages([]);
             setPendingOrderData(null);
 
-            await loadData();
+            // 🚫 REMOVED: await loadData() - causes timeout
             if (!creatingSessionRef.current?.resolved) {
               await finalizeCreationSuccess(existingOrder, 'recuperado');
             }
