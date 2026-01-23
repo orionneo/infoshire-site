@@ -298,9 +298,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setProfile(null);
+    try {
+      await supabase.auth.signOut();
+    } catch (error: any) {
+      // Ignore 403 errors from auth endpoint during logout
+      // App state will be cleared regardless
+      if (error?.status !== 403) {
+        console.error('signOut error:', error);
+      }
+    } finally {
+      setUser(null);
+      setProfile(null);
+    }
   };
 
   const value = useMemo(
