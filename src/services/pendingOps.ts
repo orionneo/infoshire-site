@@ -104,91 +104,154 @@ class PendingOpsDB {
     }
   }
 
-  private async getStore(mode: IDBTransactionMode = 'readonly'): Promise<IDBObjectStore> {
-    return this.withDB(async (db) => {
-      const tx = db.transaction([STORE_NAME], mode);
-      return tx.objectStore(STORE_NAME);
-    });
-  }
-
   async enqueue(op: PendingOp): Promise<void> {
-    const store = await this.getStore('readwrite');
-    return new Promise((resolve, reject) => {
-      const request = store.add(op);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
-    });
+    return this.withDB(
+      async (db) =>
+        new Promise((resolve, reject) => {
+          try {
+            const tx = db.transaction([STORE_NAME], 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.add(op);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+          } catch (err) {
+            reject(err);
+          }
+        })
+    );
   }
 
   async update(opId: string, updates: Partial<PendingOp>): Promise<void> {
-    const store = await this.getStore('readwrite');
-    const existing = await this.getById(opId);
-    if (!existing) throw new Error(`Op not found: ${opId}`);
-    
-    const updated = { ...existing, ...updates, updatedAt: Date.now() };
-    
-    return new Promise((resolve, reject) => {
-      const request = store.put(updated);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
-    });
+    return this.withDB(
+      async (db) =>
+        new Promise((resolve, reject) => {
+          try {
+            const tx = db.transaction([STORE_NAME], 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const getRequest = store.get(opId);
+
+            getRequest.onerror = () => reject(getRequest.error);
+            getRequest.onsuccess = () => {
+              const existing = getRequest.result as PendingOp | undefined;
+              if (!existing) {
+                reject(new Error(`Op not found: ${opId}`));
+                return;
+              }
+
+              const updated = { ...existing, ...updates, updatedAt: Date.now() };
+              const putRequest = store.put(updated);
+              putRequest.onerror = () => reject(putRequest.error);
+              putRequest.onsuccess = () => resolve();
+            };
+          } catch (err) {
+            reject(err);
+          }
+        })
+    );
   }
 
   async getById(opId: string): Promise<PendingOp | null> {
-    const store = await this.getStore();
-    return new Promise((resolve, reject) => {
-      const request = store.get(opId);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result || null);
-    });
+    return this.withDB(
+      async (db) =>
+        new Promise((resolve, reject) => {
+          try {
+            const tx = db.transaction([STORE_NAME], 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.get(opId);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result || null);
+          } catch (err) {
+            reject(err);
+          }
+        })
+    );
   }
 
   async getByOrderNumber(order_number: string): Promise<PendingOp | null> {
-    const store = await this.getStore();
-    const index = store.index('order_number');
-    return new Promise((resolve, reject) => {
-      const request = index.get(order_number);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result || null);
-    });
+    return this.withDB(
+      async (db) =>
+        new Promise((resolve, reject) => {
+          try {
+            const tx = db.transaction([STORE_NAME], 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const index = store.index('order_number');
+            const request = index.get(order_number);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result || null);
+          } catch (err) {
+            reject(err);
+          }
+        })
+    );
   }
 
   async getAll(status?: string): Promise<PendingOp[]> {
-    const store = await this.getStore();
-    const query = status !== undefined ? store.index('status').getAll(status) : store.getAll();
-    
-    return new Promise((resolve, reject) => {
-      const request = query;
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result || []);
-    });
+    return this.withDB(
+      async (db) =>
+        new Promise((resolve, reject) => {
+          try {
+            const tx = db.transaction([STORE_NAME], 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const request =
+              status !== undefined ? store.index('status').getAll(status) : store.getAll();
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result || []);
+          } catch (err) {
+            reject(err);
+          }
+        })
+    );
   }
 
   async delete(opId: string): Promise<void> {
-    const store = await this.getStore('readwrite');
-    return new Promise((resolve, reject) => {
-      const request = store.delete(opId);
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
-    });
+    return this.withDB(
+      async (db) =>
+        new Promise((resolve, reject) => {
+          try {
+            const tx = db.transaction([STORE_NAME], 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.delete(opId);
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+          } catch (err) {
+            reject(err);
+          }
+        })
+    );
   }
 
   async clear(): Promise<void> {
-    const store = await this.getStore('readwrite');
-    return new Promise((resolve, reject) => {
-      const request = store.clear();
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve();
-    });
+    return this.withDB(
+      async (db) =>
+        new Promise((resolve, reject) => {
+          try {
+            const tx = db.transaction([STORE_NAME], 'readwrite');
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.clear();
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve();
+          } catch (err) {
+            reject(err);
+          }
+        })
+    );
   }
 
   async count(): Promise<number> {
-    const store = await this.getStore();
-    return new Promise((resolve, reject) => {
-      const request = store.count();
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => resolve(request.result);
-    });
+    return this.withDB(
+      async (db) =>
+        new Promise((resolve, reject) => {
+          try {
+            const tx = db.transaction([STORE_NAME], 'readonly');
+            const store = tx.objectStore(STORE_NAME);
+            const request = store.count();
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => resolve(request.result);
+          } catch (err) {
+            reject(err);
+          }
+        })
+    );
   }
 }
 
