@@ -32,13 +32,10 @@ import {
 } from '@/db/api';
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
 import { safeStorage } from '@/utils/safeStorage';
-import { secureTabStorage } from '@/utils/secureTabStorage';
 import { useToast } from '@/hooks/use-toast';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
 
-// Chave para salvar o rascunho do formulário
-const FORM_DRAFT_KEY = 'admin_order_form_draft';
-const PENDING_CONFIRMATION_KEY = 'admin_order_pending_confirmation';
+// 🚫 NO STORAGE FOR ADMIN - all storage keys and functions disabled
 type OrderDraft = Record<string, any>;
 type CreatingSession = {
   orderNumber: string;
@@ -73,7 +70,7 @@ export default function AdminOrders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [tabStorageEnabled, setTabStorageEnabled] = useState(!secureTabStorage.isBlocked());
+  // 🚫 Storage disabled - removed tabStorageEnabled
 
   // Ler filtros da URL ao carregar
   useEffect(() => {
@@ -100,22 +97,7 @@ export default function AdminOrders() {
   >([]);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [pendingOrderData, setPendingOrderData] = useState<any>(null);
-
-  const saveTabStorageItem = useCallback((key: string, value: string) => {
-    try {
-      const stored = secureTabStorage.setItem(key, value);
-      if (!stored) {
-        setTabStorageEnabled(false);
-        return false;
-      }
-      return true;
-    } catch (error) {
-      console.warn(`Erro ao salvar "${key}" no storage de aba.`, error);
-      setTabStorageEnabled(false);
-      return false;
-    }
-  }, []);
-
+  // 🚫 Storage disabled for admin - no-op function
 
   const form = useForm({
     defaultValues: {
@@ -141,7 +123,6 @@ export default function AdminOrders() {
   useEffect(() => {
     if (!dialogOpen) return;
 
-    const savedDraft = secureTabStorage.getItem(FORM_DRAFT_KEY);
     if (savedDraft) {
       try {
         const draft = JSON.parse(savedDraft);
@@ -183,16 +164,7 @@ export default function AdminOrders() {
     }
   }, [location.state, navigate, location.pathname]);
 
-  // Auto-salvar formulário a cada mudança (APENAS se não estiver criando e storage disponível)
-  useEffect(() => {
-    if (!dialogOpen || !tabStorageEnabled || creating) return; // 🔥 Nunca salvar durante criação
-
-    const subscription = form.watch((values) => {
-      saveTabStorageItem(FORM_DRAFT_KEY, JSON.stringify(values));
-    });
-
-    return () => subscription.unsubscribe();
-  }, [dialogOpen, form, saveTabStorageItem, tabStorageEnabled, creating]);
+  // 🚫 Auto-save DISABLED for admin - no storage operations
 
   const loadData = useCallback(async () => {
     try {
@@ -249,7 +221,6 @@ export default function AdminOrders() {
     setSelectedImages([]);
     setPendingOrderData(null);
     pendingOrderRef.current = null;
-    secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
   }, [form]);
 
   const finalizeCreationSuccess = useCallback(
@@ -264,8 +235,6 @@ export default function AdminOrders() {
         description: `OS ${order.order_number || order.id}${source ? ` (${source})` : ''}`,
       });
 
-      safeStorage.removeItem(FORM_DRAFT_KEY);
-      safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
 
       resetCreationForm();
       await loadData();
@@ -291,19 +260,12 @@ export default function AdminOrders() {
       }
       setPendingOrderData(null);
       pendingOrderRef.current = null;
-      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
     },
     [toast]
   );
 
   const readDraftFromStorage = useCallback(() => {
-    const draftValue =
-      secureTabStorage.getItem(PENDING_CONFIRMATION_KEY) ||
-      secureTabStorage.getItem('ORDER_DRAFT_FALLBACK') ||
-      secureTabStorage.getItem(FORM_DRAFT_KEY) ||
-      safeStorage.getItem(PENDING_CONFIRMATION_KEY) ||
-      safeStorage.getItem('ORDER_DRAFT_FALLBACK') ||
-      safeStorage.getItem(FORM_DRAFT_KEY);
+    // const draftValue = null; // STORAGE DISABLED
     if (!draftValue) return null;
 
     try {
@@ -317,7 +279,6 @@ export default function AdminOrders() {
   const restorePendingConfirmation = useCallback(() => {
     const pending = readDraftFromStorage();
     if (!pending) {
-      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
       return;
     }
 
@@ -339,7 +300,6 @@ export default function AdminOrders() {
   const handleConfirmationCancel = useCallback(() => {
     setPendingOrderData(null);
     pendingOrderRef.current = null;
-    secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
     setShowConfirmation(false);
   }, []);
 
@@ -488,8 +448,6 @@ export default function AdminOrders() {
     // ⚠️ Não depender de storage - apenas usar memória (pendingOrderRef)
     // Storage é bloqueado por Firefox Tracking Prevention quando aba backgroundada
     try {
-      saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
-      saveTabStorageItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
     } catch (e) {
       if (import.meta.env.DEV) console.warn('Storage blocked during validation (continuing):', e);
       // Continua mesmo se storage falhar - dados estão em memory
@@ -612,8 +570,6 @@ export default function AdminOrders() {
       // ✅ limpa drafts e fecha diálogos (ignora storage errors - admin deve funcionar sem storage)
       try {
         secureTabStorage.removeItem(FORM_DRAFT_KEY);
-        secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-        secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
       } catch (e) {
         // Ignora erro de storage - admin não pode depender disso
         if (import.meta.env.DEV) console.warn('Storage cleanup error (ignored):', e);
@@ -654,8 +610,6 @@ export default function AdminOrders() {
             // ✅ Try to cleanup storage, but don't fail if blocked
             try {
               secureTabStorage.removeItem(FORM_DRAFT_KEY);
-              secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-              secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
             } catch (e) {
               if (import.meta.env.DEV) console.warn('Storage cleanup error (ignored):', e);
             }
@@ -693,7 +647,6 @@ export default function AdminOrders() {
       if (!recovered) {
         // ✅ Try to save draft, but don't fail if storage is blocked
         try {
-          saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
         } catch (e) {
           if (import.meta.env.DEV) console.warn('Cannot save draft to storage (ignored):', e);
           // Mantém dados em memory via pendingOrderRef.current
@@ -1097,8 +1050,6 @@ export default function AdminOrders() {
                       variant="outline"
                       onClick={() => {
                         secureTabStorage.removeItem(FORM_DRAFT_KEY);
-                        secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-                        secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
 
                         setShowConfirmation(false);
                         setDialogOpen(false);
