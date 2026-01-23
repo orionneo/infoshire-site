@@ -243,16 +243,18 @@ export async function createServiceOrder(
 
   /**
    * ✅ Fluxo esperado:
-   * - Cria a OS online sem cancelamento por lifecycle para evitar travas no Admin.
+   * - Cria a OS online com `.select()` para retornar os dados inseridos
    */
-  // ✅ 1) Cria a OS online - insert APENAS (sem select que causa timeout)
-  let inserted: any;
+  // ✅ 1) Cria a OS online - insert + select para retornar dados
+  let result: any;
   try {
-    // ✅ Usar abortSignal se fornecido
-    const insertQuery = supabase.from('service_orders').insert(payload);
-    const result = opts?.signal 
-      ? await insertQuery.abortSignal(opts.signal)
-      : await insertQuery;
+    // ✅ Verificar abort antes
+    if (opts?.signal?.aborted) {
+      throw new DOMException('Operação abortada', 'AbortError');
+    }
+    
+    const insertQuery = supabase.from('service_orders').insert(payload).select().single();
+    result = await insertQuery;
     
     if (result.error) {
       // ✅ IDEMPOTÊNCIA: Se falhou por unique constraint (order_number já existe)
@@ -268,20 +270,17 @@ export async function createServiceOrder(
       throw result.error;
     }
     
-    // Se chegou aqui, insert foi sucesso!
-    // Supabase gerou o UUID e criou a ordem
-    // Retornamos os dados do payload que é exatamente o que foi inserido
-    inserted = {
-      data: payload,
-      error: null
-    };
+    if (!result.data) {
+      throw new Error('Falha ao criar ordem: Supabase não retornou dados');
+    }
+    
+    console.log(`[createServiceOrder] ✅ Insert success:`, result.data.id);
   } catch (e: any) {
-    console.warn(`[createServiceOrder] Insert falhou:`, e);
+    console.error(`[createServiceOrder] Insert falhou:`, e);
     throw e;
   }
 
-  if (inserted.error) throw inserted.error;
-  const created = inserted.data as ServiceOrder;
+  const created = result.data as ServiceOrder;
 
   // ✅ 2) Itens (opcional) - não bloqueia a resposta, faz em background se falhar
   if (order.items?.length) {

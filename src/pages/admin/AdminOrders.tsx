@@ -21,21 +21,14 @@ import { Separator } from '@/components/ui/separator';
 import { SmartInput } from '@/components/ui/SmartInput';
 import { SmartTextarea } from '@/components/ui/SmartTextarea';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  createClientProfile,
-  createServiceOrder,
-  generateOrderNumber,
-  getAllProfiles,
-  getAllServiceOrders,
-  getServiceOrderByOrderNumber,
-  uploadOrderImage,
-} from '@/db/api';
+import { createClientProfile, createServiceOrder, generateOrderNumber, getAllProfiles, getAllServiceOrders, getServiceOrderByOrderNumber, uploadOrderImage } from '@/db/api';
 import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
 import { safeStorage } from '@/utils/safeStorage';
 import { secureTabStorage } from '@/utils/secureTabStorage';
 import { useToast } from '@/hooks/use-toast';
 import { createPendingOp, getPendingOpsDB } from '@/services/pendingOps';
 import { processPendingQueue, setupQueueProcessing } from '@/services/queueProcessor';
+import { setOrderImages, getOrderImages, clearOrderImages } from '@/services/imageStorage';
 import { logAiEvent, logAiError } from '@/services/debugLogger';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
 
@@ -592,7 +585,7 @@ export default function AdminOrders() {
         clientId = newClient.id;
       }
 
-      // ✅ PREPARAR payload
+      // ✅ PREPARAR payload (SEM selectedImages - não são serializáveis)
       const payload = {
         client_id: clientId,
         entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
@@ -608,11 +601,17 @@ export default function AdminOrders() {
               description: it.description || undefined,
             }))
           : undefined,
-        selectedImages: selectedImages,
       };
 
       // ✅ ENFILEIRAR no IndexedDB
       await createPendingOp(opId, orderNumber, payload);
+      
+      // ✅ Salvar imagens em memory (não podem ser JSON)
+      if (selectedImages.length > 0) {
+        setOrderImages(orderNumber, selectedImages);
+        console.info(`[AdminOrders] 📸 Saved ${selectedImages.length} images for order ${orderNumber}`);
+      }
+      
       console.info(`[AdminOrders] ✅ Enqueued in IndexedDB`, { opId, orderNumber });
 
       // ✅ Toast visual (não bloqueio)

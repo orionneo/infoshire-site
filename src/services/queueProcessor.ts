@@ -5,8 +5,9 @@
  */
 
 import { getPendingOpsDB, PendingOp } from './pendingOps';
-import { createServiceOrder } from '@/db/api';
+import { createServiceOrder, uploadOrderImage } from '@/db/api';
 import { logAiEvent, logAiError } from './debugLogger';
+import { getOrderImages, clearOrderImages } from './imageStorage';
 
 export type ProcessReason = 'app_start' | 'online' | 'visibility' | 'focus' | 'user_click' | 'interval';
 
@@ -42,6 +43,8 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
   const db = await getPendingOpsDB();
   
   try {
+    console.log(`[QueueProcessor] Processing op: ${op.opId}, attempt: ${op.attempts + 1}`);
+    
     await db.update(op.opId, {
       status: 'sending',
       lastAttemptAt: Date.now(),
@@ -54,16 +57,38 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
       attempt: op.attempts + 1,
     });
 
-    // Enviar para Supabase com opção de abort
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), 30000); // 30s timeout
+    // Enviar para Supabase com timeout
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Timeout: 30s exceeded')), 30000)
+    );
 
     try {
-      const order = await createServiceOrder(op.payload, {
-        signal: controller.signal,
-      });
+      const order = await Promise.race([
+        createServiceOrder(op.payload),
+        timeoutPromise,
+      ]) as any;
 
-      clearTimeout(timeoutHandle);
+      console.log(`[QueueProcessor] ✅ Order created:`, order.id, order.order_number);
+
+      // ✅ Upload de imagens (em background, não bloqueia)
+      const images = getOrderImages(op.order_number);
+      if (images.length > 0) {
+        console.log(`[QueueProcessor] 📸 Uploading ${images.length} images for order ${order.id}`);
+        (async () => {
+          try {
+            await Promise.all(
+              images.map((file, index) =>
+                uploadOrderImage(order.id, file, `Foto ${index + 1}`)
+              )
+            );
+            console.log(`[QueueProcessor] ✅ Images uploaded successfully`);
+          } catch (err) {
+            console.warn(`[QueueProcessor] ⚠️ Image upload failed (but order exists):`, err);
+          } finally {
+            clearOrderImages(op.order_number);
+          }
+        })();
+      }
 
       await db.update(op.opId, {
         status: 'done',
@@ -79,11 +104,14 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
 
       console.log(`✅ [QueueProcessor] Op done: ${op.opId}`);
     } catch (sendError: any) {
-      clearTimeout(timeoutHandle);
+      console.error(`[QueueProcessor] Order creation error:`, sendError);
+      // Limpar imagens se a OS falhou
+      clearOrderImages(op.order_number);
       throw sendError;
     }
   } catch (error: any) {
     const errorMsg = error?.message || String(error);
+    console.error(`[QueueProcessor] Error processing op ${op.opId}:`, errorMsg);
 
     await logAiError('QueueProcessor', error, {
       opId: op.opId,
