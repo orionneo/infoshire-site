@@ -240,14 +240,9 @@ export async function createServiceOrder(
   try {
     inserted = await supabase.from('service_orders').insert(payload).select().single();
   } catch (e: any) {
-    // Se timeout: pode ter criado no backend e o browser "dormiu"
-    const check = await supabase
-      .from('service_orders')
-      .select('*')
-      .eq('order_number', order_number)
-      .maybeSingle();
-
-    if (check?.data) return check.data as ServiceOrder;
+    // ❌ NÃO tenta buscar em catch - Firefox Tracking Prevention bloqueia
+    // A OS pode ter sido criada (check será feito no AdminOrders.tsx depois)
+    console.warn(`[createServiceOrder] Insert falhou (pode estar criado):`, e);
     throw e;
   }
 
