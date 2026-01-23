@@ -6,6 +6,7 @@ import About from './pages/About';
 import AdminClients from './pages/admin/AdminClients';
 import AdminClientProfile from './pages/admin/ClientProfile';
 import AdminDashboard from './pages/admin/AdminDashboard';
+import AdminDebug from './pages/admin/AdminDebug';
 import AdminEmailMarketing from './pages/admin/AdminEmailMarketing';
 import AdminEmailSettings from './pages/admin/AdminEmailSettings';
 import AdminFinancial from './pages/admin/AdminFinancial';
@@ -189,6 +190,11 @@ const routes: RouteConfig[] = [
     name: 'Admin Orders',
     path: '/admin/orders',
     element: withAdminGuard(<AdminOrders />),
+  },
+  {
+    name: 'Admin Debug',
+    path: '/admin/debug',
+    element: withAdminGuard(<AdminDebug />),
   },
   {
     name: 'Admin Order Detail',

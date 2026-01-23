@@ -1,0 +1,238 @@
+/**
+ * queueProcessor.ts
+ * Processa fila de operações pendentes imediatamente ao voltar (focus, online, etc)
+ * Garante retry inteligente e sem spam
+ */
+
+import { getPendingOpsDB, PendingOp } from './pendingOps';
+import { createServiceOrder } from '@/db/api';
+import { logDebug } from './debugLogger';
+
+export type ProcessReason = 'app_start' | 'online' | 'visibility' | 'focus' | 'user_click' | 'interval';
+
+interface ProcessOptions {
+  reason: ProcessReason;
+  maxRetries?: number;
+}
+
+let processingInProgress = false;
+let lastProcessTime = 0;
+const MIN_PROCESS_INTERVAL = 1000; // Mínimo 1s entre processamentos
+
+async function shouldRetry(op: PendingOp, maxRetries = 5): Promise<boolean> {
+  if (op.status === 'done' || op.status === 'partial_done') return false;
+  if (op.attempts >= maxRetries) return false;
+  return true;
+}
+
+function getRetryDelay(attempt: number, reason: ProcessReason): number {
+  // Se voltou (focus, visibility, online), ser agressivo
+  const isAggressive = ['focus', 'visibility', 'online'].includes(reason);
+  
+  if (isAggressive) {
+    // Retry rápido: 0s, 0.5s, 1s, 2s, 4s
+    return Math.min(Math.pow(2, attempt - 1) * 250, 4000);
+  }
+  
+  // Normal backoff: 1s, 2s, 4s, 8s
+  return Math.min(Math.pow(2, attempt) * 1000, 30000);
+}
+
+async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
+  const db = await getPendingOpsDB();
+  
+  try {
+    await db.update(op.opId, {
+      status: 'sending',
+      lastAttemptAt: Date.now(),
+      attempts: op.attempts + 1,
+    });
+
+    await logDebug('send_start', {
+      opId: op.opId,
+      order_number: op.order_number,
+      attempt: op.attempts + 1,
+    });
+
+    // Enviar para Supabase com opção de abort
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+    try {
+      const order = await createServiceOrder(op.payload, {
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutHandle);
+
+      await db.update(op.opId, {
+        status: 'done',
+        order_id: order.id,
+      });
+
+      await logDebug('send_success', {
+        opId: op.opId,
+        order_number: op.order_number,
+        order_id: order.id,
+        attempts: op.attempts + 1,
+      });
+
+      console.log(`✅ [QueueProcessor] Op done: ${op.opId}`);
+    } catch (sendError: any) {
+      clearTimeout(timeoutHandle);
+      throw sendError;
+    }
+  } catch (error: any) {
+    const errorMsg = error?.message || String(error);
+
+    await logDebug('send_error', {
+      opId: op.opId,
+      order_number: op.order_number,
+      error: errorMsg,
+      attempt: op.attempts + 1,
+    });
+
+    // Decidir se retry ou marcar como erro final
+    const shouldRetryNow = await shouldRetry(op);
+    
+    if (shouldRetryNow) {
+      const retryDelay = getRetryDelay(op.attempts + 1, reason);
+      
+      await db.update(op.opId, {
+        status: 'pending',
+        lastError: errorMsg,
+      });
+
+      await logDebug('retry_scheduled', {
+        opId: op.opId,
+        order_number: op.order_number,
+        delayMs: retryDelay,
+        nextAttempt: op.attempts + 2,
+      });
+
+      console.warn(
+        `⚠️ [QueueProcessor] Retry scheduled for ${op.opId} in ${retryDelay}ms (attempt ${op.attempts + 2})`
+      );
+    } else {
+      await db.update(op.opId, {
+        status: 'error',
+        lastError: errorMsg,
+      });
+
+      await logDebug('send_error_final', {
+        opId: op.opId,
+        order_number: op.order_number,
+        error: errorMsg,
+        attemptsFailed: op.attempts + 1,
+      });
+
+      console.error(`❌ [QueueProcessor] Op failed after retries: ${op.opId}`);
+    }
+  }
+}
+
+/**
+ * Processa fila de operações pendentes
+ * Chamado imediatamente ao voltar (focus, online, visibilitychange)
+ */
+export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
+  const { reason, maxRetries = 5 } = opts;
+
+  // Debounce: não processar muito frequentemente
+  const now = Date.now();
+  if (now - lastProcessTime < MIN_PROCESS_INTERVAL) {
+    console.log(`[QueueProcessor] Skipping (too soon, reason: ${reason})`);
+    return;
+  }
+
+  if (processingInProgress) {
+    console.log(`[QueueProcessor] Already processing (reason: ${reason})`);
+    return;
+  }
+
+  processingInProgress = true;
+  lastProcessTime = now;
+
+  try {
+    const db = await getPendingOpsDB();
+    const pending = await db.getAll('pending');
+
+    if (pending.length === 0) {
+      console.log(`[QueueProcessor] No pending ops (reason: ${reason})`);
+      return;
+    }
+
+    await logDebug('process_start', {
+      reason,
+      count: pending.length,
+    });
+
+    console.log(`[QueueProcessor] Processing ${pending.length} pending ops (reason: ${reason})`);
+
+    // Processar em paralelo (max 3 concurrent)
+    const concurrent = 3;
+    for (let i = 0; i < pending.length; i += concurrent) {
+      const batch = pending.slice(i, i + concurrent);
+      await Promise.all(batch.map((op) => processOp(op, reason)));
+    }
+
+    await logDebug('process_done', {
+      reason,
+      count: pending.length,
+    });
+
+    console.log(`✅ [QueueProcessor] Done (reason: ${reason})`);
+  } catch (error) {
+    console.error(`❌ [QueueProcessor] Error:`, error);
+    await logDebug('process_error', {
+      reason,
+      error: String(error),
+    });
+  } finally {
+    processingInProgress = false;
+  }
+}
+
+/**
+ * Setup auto-processing triggers
+ * Chamar uma vez ao iniciar a app
+ */
+export function setupQueueProcessing(): void {
+  console.log('[QueueProcessor] Setting up auto-processing triggers');
+
+  // 1. App startup
+  processPendingQueue({ reason: 'app_start' }).catch(console.error);
+
+  // 2. Online event
+  window.addEventListener('online', () => {
+    console.log('[QueueProcessor] Online event detected');
+    processPendingQueue({ reason: 'online' }).catch(console.error);
+  });
+
+  // 3. Visibility change (voltou da aba)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      console.log('[QueueProcessor] Visibility changed: visible');
+      processPendingQueue({ reason: 'visibility' }).catch(console.error);
+    }
+  });
+
+  // 4. Focus event
+  window.addEventListener('focus', () => {
+    console.log('[QueueProcessor] Focus event detected');
+    processPendingQueue({ reason: 'focus' }).catch(console.error);
+  });
+
+  // 5. Interval fallback (15s) - caso os eventos acima não funcionem
+  setInterval(() => {
+    processPendingQueue({ reason: 'interval' }).catch(console.error);
+  }, 15000);
+}
+
+/**
+ * Força processamento imediato (para testing/manual)
+ */
+export async function forceProcessQueue(): Promise<void> {
+  console.log('[QueueProcessor] Manual force process');
+  await processPendingQueue({ reason: 'user_click' });
+}
