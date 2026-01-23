@@ -44,14 +44,22 @@ export function RouteGuard({ children }: RouteGuardProps) {
     if (loading) return;
 
     const isPublic = matchPublicRoute(location.pathname, PUBLIC_ROUTES);
+    const isAdmin = location.pathname.startsWith('/admin');
 
     // 1) Sem user e rota protegida => login
-    if (!user && !isPublic) {
+    if (!user && !isPublic && !isAdmin) {
       navigate('/login', { state: { from: location.pathname }, replace: true });
       return;
     }
 
-    // 2) Com user, mas sem profile carregado ainda: não redireciona (evita loop)
+    // 2) Admin route sem user => login (AdminGuard vai validar role depois)
+    if (!user && isAdmin) {
+      navigate('/login', { state: { from: location.pathname }, replace: true });
+      return;
+    }
+
+    // 3) Com user, mas sem profile carregado ainda: NÃO redireciona (evita loop)
+    // AdminGuard.tsx será responsável de validar se é admin após profile carregar
     if (user && !profile) return;
 
     // ✅ Phone redirect fica no AuthContext (evita lógica duplicada/loop)

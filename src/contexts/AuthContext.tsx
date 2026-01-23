@@ -124,6 +124,10 @@ const PHONE_EXEMPT_ROUTES = [
   '/forgot-password',
   '/reset-password',
   '/change-password',
+  '/admin',         // ✅ Admins don't need phone verification
+  '/admin/orders',
+  '/admin/clients',
+  '/admin/dashboard',
 ];
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -147,12 +151,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // ✅ Forçar telefone (se user + profile já carregaram)
+  // 🚫 CRÍTICO: Nunca redirecionar admin - apenas clients que faltam phone
   useEffect(() => {
     if (!loading && user && profile) {
       const path = location.pathname;
+      const isAdmin = profile.role === 'admin';
+      const isAdminPath = path.startsWith('/admin');
       const isExempt = PHONE_EXEMPT_ROUTES.includes(path);
 
-      if (!isExempt && profile.role !== 'admin' && needsPhone(profile)) {
+      // 🚫 NUNCA redirecionar admin, mesmo sem phone
+      if (!isExempt && !isAdmin && !isAdminPath && needsPhone(profile)) {
         navigate('/complete-profile', { replace: true });
       }
     }
