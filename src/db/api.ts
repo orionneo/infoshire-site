@@ -116,15 +116,18 @@ export async function createClientProfile(clientData: {
   if (authError) throw authError;
   if (!authData.user) throw new Error('Falha ao criar usuário');
 
-  // Get the created profile
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', authData.user.id)
-    .maybeSingle();
-
-  if (profileError) throw profileError;
-  if (!profile) throw new Error('Perfil não encontrado');
+  // ✅ Retorna perfil construído a partir do auth user
+  // Não tenta fazer select() que pode ser bloqueado por Tracking Prevention
+  const profile: Profile = {
+    id: authData.user.id,
+    name: clientData.name,
+    email: clientData.email,
+    phone: clientData.phone,
+    role: 'client',
+    password_changed: false,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
 
   return profile;
 }
@@ -235,7 +238,7 @@ export async function createServiceOrder(
    * ✅ Fluxo esperado:
    * - Cria a OS online sem cancelamento por lifecycle para evitar travas no Admin.
    */
-  // ✅ 1) Cria a OS online (não usa cancelamento por lifecycle)
+  // ✅ 1) Cria a OS online - SEM select() desnecessário
   let inserted: any;
   try {
     inserted = await supabase.from('service_orders').insert(payload).select().single();
@@ -249,7 +252,7 @@ export async function createServiceOrder(
   if (inserted.error) throw inserted.error;
   const created = inserted.data as ServiceOrder;
 
-  // ✅ 2) Itens (opcional) com timeout
+  // ✅ 2) Itens (opcional) - não bloqueia a resposta, faz em background se falhar
   if (order.items?.length) {
     const itemsPayload = order.items.map((it) => ({
       service_order_id: created.id,
@@ -258,27 +261,23 @@ export async function createServiceOrder(
       description: it.description ?? null,
     }));
 
-    const itemsRes = await supabase.from('service_order_items').insert(itemsPayload);
-    if (itemsRes.error) throw itemsRes.error;
-  }
-
-  // ✅ 3) Histórico inicial: **NUNCA** pode travar a criação da OS
-  // - Se aba estiver hidden, nem tenta (PWA pausa requests)
-  // - Se der timeout/erro/RLS, só loga e segue
-  try {
-    const historyRes = await supabase.from('order_status_history').insert({
-      order_id: created.id,
-      status: 'received',
-      notes: 'Ordem de serviço criada',
-      created_by: sessionData.session.user.id,
+    // 🚫 NÃO AWAIT: Deixa completar em background
+    // O importante é retornar a OS criada rapidamente
+    supabase.from('service_order_items').insert(itemsPayload).catch((e) => {
+      console.warn('[createServiceOrder] Items insert falhou (background):', e);
     });
-
-    if ((historyRes as any)?.error) {
-      console.warn('Falha ao criar histórico inicial (ignorado):', (historyRes as any).error);
-    }
-  } catch (e) {
-    console.warn('Histórico inicial não foi gravado (ignorado):', e);
   }
+
+  // ✅ 3) Histórico inicial: **NUNCA** bloqueia - faz async em background
+  // Se aba backgroundada, PWA pausa anyway. Não vai travar a UI.
+  supabase.from('order_status_history').insert({
+    order_id: created.id,
+    status: 'received',
+    notes: 'Ordem de serviço criada',
+    created_by: sessionData.session.user.id,
+  }).catch((e) => {
+    console.warn('[createServiceOrder] History insert falhou (background):', e);
+  });
 
   return created;
 }
