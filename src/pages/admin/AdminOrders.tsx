@@ -532,32 +532,23 @@ export default function AdminOrders() {
       resolved: false,
     };
 
-    // ✅ CRITICAL FIX: Hard timeout (30 seconds) com recuperação automática
-    // Previne que "Criando..." fique preso indefinidamente (sem depender de storage)
+    // ✅ CRITICAL FIX: Hard timeout (30 seconds) - SIMPLE and ROBUST
+    // NEVER try to access storage/backend inside timeout callback
+    // Firefox blocks everything when tab is backgrounded for 15s+
     const timeoutHandle = window.setTimeout(() => {
       if (!creatingSessionRef.current?.resolved) {
-        console.warn(`⏱️ Order creation timeout (${opId}). Checking backend...`);
-        // Mark as resolved to prevent multiple completions
+        console.warn(`⏱️ Order creation timeout (${opId}). Releasing UI...`);
         if (creatingSessionRef.current) {
           creatingSessionRef.current.resolved = true;
         }
+        // ✅ IMMEDIATELY release the UI - user can try again
         setCreating(false);
-
-        // Attempt recovery: check if order was created on backend
-        getServiceOrderByOrderNumber(orderNumber)
-          .then((existingOrder) => {
-            if (existingOrder) {
-              console.log(`✅ Order recovered from backend: ${orderNumber}`);
-              finalizeCreationSuccess(existingOrder, 'recuperado (timeout)');
-            } else {
-              console.warn(`❌ Order not found after timeout: ${orderNumber}`);
-              finalizeCreationError('Timeout ao criar OS. Verifique sua conexão e tente novamente.');
-            }
-          })
-          .catch((err) => {
-            console.error('Erro ao recuperar OS após timeout:', err);
-            finalizeCreationError('Timeout ao criar OS. Verifique sua conexão e tente novamente.');
-          });
+        // Simple message - user will know timeout occurred
+        toast({
+          title: 'Criação demorou muito',
+          description: 'Verifique sua conexão. Tente criar a ordem novamente se não vir na lista.',
+          variant: 'destructive',
+        });
       }
     }, 30000);
 
