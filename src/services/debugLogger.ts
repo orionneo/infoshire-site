@@ -6,6 +6,16 @@
 
 import { supabase } from '@/db/supabase';
 
+export interface DebugEvent {
+  id?: string;
+  created_at?: string;
+  user_id?: string;
+  function_name?: string;
+  error_message: string;
+  error_stack?: string;
+  input_snapshot?: Record<string, any>;
+}
+
 type AiLogPayload = {
   function_name: string;
   error_message: string;
@@ -104,4 +114,42 @@ export async function logAiError(
 // Backward compat: logDebug agora é alias para logAiEvent
 export async function logDebug(eventType: string, data?: Record<string, any>): Promise<void> {
   await logAiEvent('AdminOrders', eventType, data);
+}
+
+/**
+ * Busca últimos N eventos de debug (para painel admin)
+ */
+export async function getDebugEvents(limit = 100): Promise<DebugEvent[]> {
+  try {
+    const { data, error } = await supabase
+      .from('ai_errors')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+    return (data || []) as DebugEvent[];
+  } catch (error) {
+    console.error('[DebugLogger] Failed to fetch events:', error);
+    return [];
+  }
+}
+
+/**
+ * Busca eventos de uma operação específica (timeline)
+ */
+export async function getOpDebugTimeline(opId: string): Promise<DebugEvent[]> {
+  try {
+    const { data, error } = await supabase
+      .from('ai_errors')
+      .select('*')
+      .or(`input_snapshot->>opId.eq.${opId},input_snapshot->>op_id.eq.${opId}`)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    return (data || []) as DebugEvent[];
+  } catch (error) {
+    console.error('[DebugLogger] Failed to fetch timeline:', error);
+    return [];
+  }
 }
