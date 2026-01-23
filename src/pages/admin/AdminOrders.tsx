@@ -73,7 +73,13 @@ export default function AdminOrders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [tabStorageEnabled, setTabStorageEnabled] = useState(!secureTabStorage.isBlocked());
+  const [tabStorageEnabled, setTabStorageEnabled] = useState(() => {
+    try {
+      return !secureTabStorage.isBlocked();
+    } catch (e) {
+      return false;
+    }
+  });
 
   // Ler filtros da URL ao carregar
   useEffect(() => {
@@ -110,8 +116,8 @@ export default function AdminOrders() {
       }
       return true;
     } catch (error) {
-      console.warn(`Erro ao salvar "${key}" no storage de aba.`, error);
-      setTabStorageEnabled(false);
+      // Firefox Tracking Prevention blocks storage when tab backgrounded
+      // Silently ignore - admin must continue working even without storage
       return false;
     }
   }, []);
@@ -141,7 +147,13 @@ export default function AdminOrders() {
   useEffect(() => {
     if (!dialogOpen) return;
 
-    const savedDraft = secureTabStorage.getItem(FORM_DRAFT_KEY);
+    let savedDraft: string | null = null;
+    try {
+      savedDraft = secureTabStorage.getItem(FORM_DRAFT_KEY);
+    } catch (e) {
+      // Storage blocked - ignore
+    }
+    
     if (savedDraft) {
       try {
         const draft = JSON.parse(savedDraft);
@@ -249,7 +261,11 @@ export default function AdminOrders() {
     setSelectedImages([]);
     setPendingOrderData(null);
     pendingOrderRef.current = null;
-    secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+    try {
+      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+    } catch (e) {
+      // Storage blocked - ignore
+    }
   }, [form]);
 
   const finalizeCreationSuccess = useCallback(
@@ -264,8 +280,12 @@ export default function AdminOrders() {
         description: `OS ${order.order_number || order.id}${source ? ` (${source})` : ''}`,
       });
 
-      safeStorage.removeItem(FORM_DRAFT_KEY);
-      safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
+      try {
+        safeStorage.removeItem(FORM_DRAFT_KEY);
+        safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
+      } catch (e) {
+        // Storage blocked - ignore
+      }
 
       resetCreationForm();
       await loadData();
@@ -287,23 +307,35 @@ export default function AdminOrders() {
       });
 
       if (pendingOrderRef.current) {
-        safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(pendingOrderRef.current));
+        try {
+          safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(pendingOrderRef.current));
+        } catch (e) {
+          // Storage blocked - ignore
+        }
       }
       setPendingOrderData(null);
       pendingOrderRef.current = null;
-      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+      try {
+        secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+      } catch (e) {
+        // Storage blocked - ignore
+      }
     },
     [toast]
   );
 
   const readDraftFromStorage = useCallback(() => {
-    const draftValue =
-      secureTabStorage.getItem(PENDING_CONFIRMATION_KEY) ||
-      secureTabStorage.getItem('ORDER_DRAFT_FALLBACK') ||
-      secureTabStorage.getItem(FORM_DRAFT_KEY) ||
-      safeStorage.getItem(PENDING_CONFIRMATION_KEY) ||
-      safeStorage.getItem('ORDER_DRAFT_FALLBACK') ||
-      safeStorage.getItem(FORM_DRAFT_KEY);
+    let draftValue: string | null = null;
+    try {
+      draftValue = secureTabStorage.getItem(PENDING_CONFIRMATION_KEY) ||
+        secureTabStorage.getItem('ORDER_DRAFT_FALLBACK') ||
+        secureTabStorage.getItem(FORM_DRAFT_KEY) ||
+        safeStorage.getItem(PENDING_CONFIRMATION_KEY) ||
+        safeStorage.getItem('ORDER_DRAFT_FALLBACK') ||
+        safeStorage.getItem(FORM_DRAFT_KEY);
+    } catch (e) {
+      // Storage blocked - ignore
+    }
     if (!draftValue) return null;
 
     try {
@@ -317,7 +349,11 @@ export default function AdminOrders() {
   const restorePendingConfirmation = useCallback(() => {
     const pending = readDraftFromStorage();
     if (!pending) {
-      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+      try {
+        secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+      } catch (e) {
+        // Storage blocked - ignore
+      }
       return;
     }
 
@@ -339,7 +375,11 @@ export default function AdminOrders() {
   const handleConfirmationCancel = useCallback(() => {
     setPendingOrderData(null);
     pendingOrderRef.current = null;
-    secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+    try {
+      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+    } catch (e) {
+      // Storage blocked - ignore
+    }
     setShowConfirmation(false);
   }, []);
 
@@ -1096,9 +1136,13 @@ export default function AdminOrders() {
                       type="button"
                       variant="outline"
                       onClick={() => {
-                        secureTabStorage.removeItem(FORM_DRAFT_KEY);
-                        secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-                        secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+                        try {
+                          secureTabStorage.removeItem(FORM_DRAFT_KEY);
+                          secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
+                          secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
+                        } catch (e) {
+                          // Storage blocked - ignore
+                        }
 
                         setShowConfirmation(false);
                         setDialogOpen(false);
