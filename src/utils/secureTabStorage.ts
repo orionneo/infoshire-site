@@ -3,11 +3,16 @@ import { safeStorage } from '@/utils/safeStorage';
 const memoryStore = new Map<string, string>();
 
 const getItem = (key: string): string | null => {
-  if (memoryStore.has(key)) {
-    return memoryStore.get(key) ?? null;
-  }
+  try {
+    if (memoryStore.has(key)) {
+      return memoryStore.get(key) ?? null;
+    }
 
-  return safeStorage.getItem(key);
+    return safeStorage.getItem(key);
+  } catch (error) {
+    // Storage blocked - return null silently
+    return null;
+  }
 };
 
 let storageBlocked = false;
@@ -34,8 +39,12 @@ const setItem = (key: string, value: string): boolean => {
 };
 
 const removeItem = (key: string): void => {
-  memoryStore.delete(key);
-  safeStorage.removeItem(key);
+  try {
+    memoryStore.delete(key);
+    safeStorage.removeItem(key);
+  } catch (error) {
+    // Storage blocked - ignore silently
+  }
 };
 
 export const secureTabStorage = {

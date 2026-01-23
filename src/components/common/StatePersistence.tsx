@@ -28,8 +28,15 @@ export function StatePersistence({ children }: { children: React.ReactNode }) {
     }
 
     // Restaurar posição de scroll e rota ao montar
-    const savedRoute = secureTabStorage.getItem('app_last_route');
-    const savedScrollY = secureTabStorage.getItem('app_scroll_y');
+    let savedRoute: string | null = null;
+    let savedScrollY: string | null = null;
+    
+    try {
+      savedRoute = secureTabStorage.getItem('app_last_route');
+      savedScrollY = secureTabStorage.getItem('app_scroll_y');
+    } catch (e) {
+      // Storage blocked - ignore
+    }
 
     if (savedRoute && savedRoute !== location.pathname && savedRoute !== '/') {
       // ✅ Validate savedRoute doesn't contain admin paths
@@ -68,12 +75,13 @@ export function StatePersistence({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      if (!secureTabStorage.setItem('app_last_route', location.pathname)) {
+      const result = secureTabStorage.setItem('app_last_route', location.pathname);
+      if (!result) {
         return;
       }
       secureTabStorage.setItem('app_scroll_y', window.scrollY.toString());
     } catch (error) {
-      console.warn('Erro ao salvar estado de navegação:', error);
+      // Storage blocked - ignore silently
     }
   }, [location.pathname, isAdminRoute]);
 
