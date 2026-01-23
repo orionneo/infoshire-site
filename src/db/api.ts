@@ -198,8 +198,14 @@ export async function createServiceOrder(
       serial_number?: string;
       description?: string;
     }>;
-  }
+  },
+  opts?: { signal?: AbortSignal }
 ): Promise<ServiceOrder> {
+  // ✅ Verificar abort antes de começar
+  if (opts?.signal?.aborted) {
+    throw new DOMException('Operação abortada', 'AbortError');
+  }
+
   // ✅ Exigir sessão: evita POST sem JWT
   const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
   if (sessionErr) throw sessionErr;
@@ -210,6 +216,7 @@ export async function createServiceOrder(
     throw new Error('Sem internet. Conecte e tente novamente.');
   }
 
+  // ✅ Se recebeu order_number, usa esse. Caso contrário gera um novo.
   const order_number = order.order_number ?? generateOrderNumber();
 
   const payload: Partial<ServiceOrder> & {
@@ -241,9 +248,12 @@ export async function createServiceOrder(
   // ✅ 1) Cria a OS online - insert APENAS (sem select que causa timeout)
   let inserted: any;
   try {
-    // ❌ REMOVIDO: .select().single() causava timeout
-    // Insert já retorna com status 201 quando sucesso
-    const result = await supabase.from('service_orders').insert(payload);
+    // ✅ Usar abortSignal se fornecido
+    const insertQuery = supabase.from('service_orders').insert(payload);
+    const result = opts?.signal 
+      ? await insertQuery.abortSignal(opts.signal)
+      : await insertQuery;
+    
     if (result.error) throw result.error;
     
     // Se chegou aqui, insert foi sucesso!
@@ -272,21 +282,29 @@ export async function createServiceOrder(
 
     // 🚫 NÃO AWAIT: Deixa completar em background
     // O importante é retornar a OS criada rapidamente
-    supabase.from('service_order_items').insert(itemsPayload).catch((e) => {
-      console.warn('[createServiceOrder] Items insert falhou (background):', e);
-    });
+    (async () => {
+      try {
+        await supabase.from('service_order_items').insert(itemsPayload);
+      } catch (e) {
+        console.warn('[createServiceOrder] Items insert falhou (background):', e);
+      }
+    })();
   }
 
   // ✅ 3) Histórico inicial: **NUNCA** bloqueia - faz async em background
   // Se aba backgroundada, PWA pausa anyway. Não vai travar a UI.
-  supabase.from('order_status_history').insert({
-    order_id: created.id,
-    status: 'received',
-    notes: 'Ordem de serviço criada',
-    created_by: sessionData.session.user.id,
-  }).catch((e) => {
-    console.warn('[createServiceOrder] History insert falhou (background):', e);
-  });
+  (async () => {
+    try {
+      await supabase.from('order_status_history').insert({
+        order_id: created.id,
+        status: 'received',
+        notes: 'Ordem de serviço criada',
+        created_by: sessionData.session.user.id,
+      });
+    } catch (e) {
+      console.warn('[createServiceOrder] History insert falhou (background):', e);
+    }
+  })();
 
   return created;
 }
