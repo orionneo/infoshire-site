@@ -6,7 +6,7 @@
 
 import { getPendingOpsDB, PendingOp } from './pendingOps';
 import { createServiceOrder } from '@/db/api';
-import { logDebug } from './debugLogger';
+import { logAiEvent, logAiError } from './debugLogger';
 
 export type ProcessReason = 'app_start' | 'online' | 'visibility' | 'focus' | 'user_click' | 'interval';
 
@@ -48,7 +48,7 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
       attempts: op.attempts + 1,
     });
 
-    await logDebug('send_start', {
+    await logAiEvent('QueueProcessor', 'send_start', {
       opId: op.opId,
       order_number: op.order_number,
       attempt: op.attempts + 1,
@@ -70,7 +70,7 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
         order_id: order.id,
       });
 
-      await logDebug('send_success', {
+      await logAiEvent('QueueProcessor', 'send_success', {
         opId: op.opId,
         order_number: op.order_number,
         order_id: order.id,
@@ -85,10 +85,9 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
   } catch (error: any) {
     const errorMsg = error?.message || String(error);
 
-    await logDebug('send_error', {
+    await logAiError('QueueProcessor', error, {
       opId: op.opId,
       order_number: op.order_number,
-      error: errorMsg,
       attempt: op.attempts + 1,
     });
 
@@ -103,7 +102,7 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
         lastError: errorMsg,
       });
 
-      await logDebug('retry_scheduled', {
+      await logAiEvent('QueueProcessor', 'retry_scheduled', {
         opId: op.opId,
         order_number: op.order_number,
         delayMs: retryDelay,
@@ -119,10 +118,9 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
         lastError: errorMsg,
       });
 
-      await logDebug('send_error_final', {
+      await logAiError('QueueProcessor', error, {
         opId: op.opId,
         order_number: op.order_number,
-        error: errorMsg,
         attemptsFailed: op.attempts + 1,
       });
 
@@ -147,13 +145,13 @@ export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
     // Debounce: não processar muito frequentemente (para interval/online)
     if (now - lastProcessTime < MIN_PROCESS_INTERVAL) {
       console.log(`[QueueProcessor] Skipping throttle (too soon, reason: ${reason})`);
-      await logDebug('queue_processor_throttled', { reason });
+      await logAiEvent('QueueProcessor', 'queue_processor_throttled', { reason });
       return;
     }
   } else {
     // Focus/visibility/user_click: log que foi processado sem throttle
     console.info(`[QueueProcessor] 🚀 IMMEDIATE PROCESS (NO THROTTLE): reason=${reason}`);
-    await logDebug('queue_processor_immediate', { reason });
+    await logAiEvent('QueueProcessor', 'queue_processor_immediate', { reason });
   }
 
   if (processingInProgress) {
@@ -173,7 +171,7 @@ export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
       return;
     }
 
-    await logDebug('process_start', {
+    await logAiEvent('QueueProcessor', 'process_start', {
       reason,
       count: pending.length,
     });
@@ -187,7 +185,7 @@ export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
       await Promise.all(batch.map((op) => processOp(op, reason)));
     }
 
-    await logDebug('process_done', {
+    await logAiEvent('QueueProcessor', 'process_done', {
       reason,
       count: pending.length,
     });
@@ -195,9 +193,8 @@ export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
     console.log(`✅ [QueueProcessor] Done (reason: ${reason})`);
   } catch (error) {
     console.error(`❌ [QueueProcessor] Error:`, error);
-    await logDebug('process_error', {
+    await logAiError('QueueProcessor', error, {
       reason,
-      error: String(error),
     });
   } finally {
     processingInProgress = false;

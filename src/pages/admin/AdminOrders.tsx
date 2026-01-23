@@ -36,7 +36,7 @@ import { secureTabStorage } from '@/utils/secureTabStorage';
 import { useToast } from '@/hooks/use-toast';
 import { createPendingOp, getPendingOpsDB } from '@/services/pendingOps';
 import { processPendingQueue, setupQueueProcessing } from '@/services/queueProcessor';
-import { logDebug } from '@/services/debugLogger';
+import { logAiEvent, logAiError } from '@/services/debugLogger';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
 
 // Chave para salvar o rascunho do formulário
@@ -539,13 +539,13 @@ export default function AdminOrders() {
   const handleConfirmOrder = async () => {
     // 🎯 REQUISITO PRODUÇÃO: TODO clique feedback IMEDIATO, botão NUNCA bloqueado por estado antigo
     console.info('[AdminOrders] 🖱️ UI_CONFIRM_CLICK_ALWAYS - Initiating order creation');
-    await logDebug('ui_confirm_click_always', { timestamp: new Date().toISOString() });
+    await logAiEvent('AdminOrders', 'ui_confirm_click_always', { timestamp: new Date().toISOString() });
 
     try {
       const data = pendingOrderRef.current ?? readDraftFromStorage();
       if (!data) {
         console.warn('[AdminOrders] ⚠️ UI_CONFIRM_INVALID: no draft data');
-        await logDebug('ui_confirm_invalid', { reason: 'no_draft_data' });
+        await logAiEvent('AdminOrders', 'ui_confirm_invalid', { reason: 'no_draft_data' });
         toast({
           title: 'Dados da OS não encontrados',
           description: 'Não foi possível recuperar o rascunho. Revise a confirmação e tente novamente.',
@@ -565,7 +565,7 @@ export default function AdminOrders() {
 
       if (isDuplicate) {
         console.info('[AdminOrders] ℹ️ UI_CONFIRM_DUPLICATE: same order_number already pending');
-        await logDebug('ui_confirm_duplicate', { orderNumber, reason: 'same_order_already_pending' });
+        await logAiEvent('AdminOrders', 'ui_confirm_duplicate', { orderNumber, reason: 'same_order_already_pending' });
         toast({
           title: 'OS já está em envio',
           description: 'Esta ordem de serviço já está sendo processada. Aguarde.',
@@ -576,7 +576,7 @@ export default function AdminOrders() {
 
       // ✅ ENFILEIRAR SEMPRE (sem guards de creating/elapsed)
       console.info(`[AdminOrders] ✅ UI_CONFIRM_ENQUEUED: starting enqueue`, { opId, orderNumber });
-      await logDebug('ui_confirm_enqueued', { opId, orderNumber });
+      await logAiEvent('AdminOrders', 'ui_confirm_enqueued', { opId, orderNumber });
 
       let clientId = data.client_id;
       if (isNewClient) {
@@ -643,11 +643,11 @@ export default function AdminOrders() {
       console.log(`[AdminOrders] 🚀 ENQUEUED ${opId}, triggering queue processing...`);
       processPendingQueue({ reason: 'user_click' }).catch((err) => {
         console.error('Queue processor error:', err);
-        logDebug('process_error', { opId, error: String(err) });
+        logAiError('AdminOrders', err, { opId });
       });
     } catch (err: any) {
       console.error('❌ Erro ao processar clique:', err);
-      await logDebug('ui_confirm_error', { error: String(err) });
+      await logAiError('AdminOrders', err, {});
       toast({
         title: 'Erro',
         description: err?.message || 'Falha ao processar ordem.',
