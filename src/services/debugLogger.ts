@@ -14,6 +14,9 @@ export interface DebugEvent {
   error_message: string;
   error_stack?: string;
   input_snapshot?: Record<string, any>;
+  event_type?: string;
+  data?: Record<string, any>;
+  message?: string;
 }
 
 type AiLogPayload = {
@@ -55,13 +58,12 @@ export async function logAiEvent(
       os_id: snapshot?.os_id || null,
     };
 
-    // Fire-and-forget: não await, não trata erro
-    supabase
-      .from('ai_errors')
-      .insert([payload])
-      .catch((err) => {
-        if (isDevMode) console.warn(`[${functionName}] Log failed (ignored):`, err.message);
-      });
+    // Fire-and-forget: tenta mas não quebra
+    try {
+      await supabase.from('ai_errors').insert([payload]);
+    } catch (insertErr) {
+      if (isDevMode) console.warn(`[${functionName}] Log failed (ignored):`, insertErr);
+    }
   } catch (error) {
     if (isDevMode) console.warn(`[${functionName}] Log error (ignored):`, error);
   }
@@ -99,13 +101,12 @@ export async function logAiError(
       os_id: snapshot?.os_id || null,
     };
 
-    // Fire-and-forget: não await, não trata erro
-    supabase
-      .from('ai_errors')
-      .insert([payload])
-      .catch((err) => {
-        if (isDevMode) console.warn(`[${functionName}] Error log failed (ignored):`, err.message);
-      });
+    // Fire-and-forget: tenta mas não quebra
+    try {
+      await supabase.from('ai_errors').insert([payload]);
+    } catch (insertErr) {
+      if (isDevMode) console.warn(`[${functionName}] Error log failed (ignored):`, insertErr);
+    }
   } catch (error) {
     if (isDevMode) console.warn(`[${functionName}] Error log catch (ignored):`, error);
   }
