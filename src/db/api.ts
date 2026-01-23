@@ -243,18 +243,19 @@ export async function createServiceOrder(
 
   /**
    * ✅ Fluxo esperado:
-   * - Cria a OS online com `.select()` para retornar os dados inseridos
+   * - Cria a OS online sem cancelamento por lifecycle para evitar travas no Admin.
    */
-  // ✅ 1) Cria a OS online - insert + select para retornar dados
-  let result: any;
+  // ✅ 1) Cria a OS online - insert com retorno mínimo (id, order_number)
+  let inserted: any;
   try {
-    // ✅ Verificar abort antes
-    if (opts?.signal?.aborted) {
-      throw new DOMException('Operação abortada', 'AbortError');
-    }
-    
-    const insertQuery = supabase.from('service_orders').insert(payload).select().single();
-    result = await insertQuery;
+    // ✅ Usar abortSignal se fornecido
+    const insertQuery = supabase
+      .from('service_orders')
+      .insert(payload)
+      .select('id, order_number');
+    const result = opts?.signal 
+      ? await (insertQuery as any).abortSignal(opts.signal).single()
+      : await insertQuery.single();
     
     if (result.error) {
       // ✅ IDEMPOTÊNCIA: Se falhou por unique constraint (order_number já existe)
@@ -270,22 +271,28 @@ export async function createServiceOrder(
       throw result.error;
     }
     
-    if (!result.data) {
-      throw new Error('Falha ao criar ordem: Supabase não retornou dados');
-    }
-    
-    console.log(`[createServiceOrder] ✅ Insert success:`, result.data.id);
+    // Se chegou aqui, insert foi sucesso!
+    inserted = result;
   } catch (e: any) {
-    console.error(`[createServiceOrder] Insert falhou:`, e);
+    console.warn(`[createServiceOrder] Insert falhou:`, e);
     throw e;
   }
 
-  const created = result.data as ServiceOrder;
+  if (inserted.error) throw inserted.error;
+  const insertedRow = inserted.data as { order_number?: string | null } | null;
+  const createdOrderNumber = insertedRow?.order_number ?? order_number;
+  const created = createdOrderNumber
+    ? await getServiceOrderByOrderNumber(createdOrderNumber)
+    : null;
+  if (!created?.id) {
+    throw new Error('Falha ao obter a ordem de serviço criada.');
+  }
+  const createdId = created.id;
 
   // ✅ 2) Itens (opcional) - não bloqueia a resposta, faz em background se falhar
-  if (order.items?.length) {
+  if (order.items?.length && createdId) {
     const itemsPayload = order.items.map((it) => ({
-      service_order_id: created.id,
+      service_order_id: createdId,
       equipment: it.equipment,
       serial_number: it.serial_number ?? null,
       description: it.description ?? null,
@@ -307,7 +314,7 @@ export async function createServiceOrder(
   (async () => {
     try {
       await supabase.from('order_status_history').insert({
-        order_id: created.id,
+        order_id: createdId,
         status: 'received',
         notes: 'Ordem de serviço criada',
         created_by: sessionData.session.user.id,
