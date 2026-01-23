@@ -569,12 +569,13 @@ export default function AdminOrders() {
       resolved: false,
     };
 
-    // ✅ CRITICAL FIX: Hard timeout (30 seconds) - SIMPLE and ROBUST
+    // ✅ CRITICAL FIX: Hard timeout (60 seconds) - SIMPLE and ROBUST
     // NEVER try to access storage/backend inside timeout callback
     // Firefox blocks everything when tab is backgrounded for 15s+
+    console.log(`[AdminOrders] Starting order creation with 60s timeout (opId: ${opId})`);
     const timeoutHandle = window.setTimeout(() => {
       if (!creatingSessionRef.current?.resolved) {
-        console.warn(`⏱️ Order creation timeout (${opId}). Releasing UI...`);
+        console.warn(`⏱️ Order creation timeout AFTER 60s (${opId}). Releasing UI...`);
         if (creatingSessionRef.current) {
           creatingSessionRef.current.resolved = true;
         }
@@ -587,7 +588,7 @@ export default function AdminOrders() {
           variant: 'destructive',
         });
       }
-    }, 30000);
+    }, 60000);
 
     try {
       let clientId = data.client_id;
@@ -608,6 +609,7 @@ export default function AdminOrders() {
       if (import.meta.env.DEV) {
         console.info('[ADMIN][OS] calling createServiceOrder', { orderNumber });
       }
+      console.log(`[AdminOrders] 🚀 START createServiceOrder call (opId: ${opId}, orderNum: ${orderNumber})`);
       const order = await createServiceOrder(
         {
           client_id: clientId,
