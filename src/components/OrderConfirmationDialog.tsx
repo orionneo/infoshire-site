@@ -312,12 +312,11 @@ export function OrderConfirmationDialog({
           <Button
             type="button"
             onClick={onConfirm}
-            disabled={loading && !forceEnabled}
+            disabled={false}
             className="min-w-[140px]"
             data-testid="confirm-button"
-            data-disabled={loading && !forceEnabled ? 'true' : 'false'}
             data-loading={loading ? 'true' : 'false'}
-            title={`Button state: loading=${loading}, forceEnabled=${forceEnabled}, disabled=${loading && !forceEnabled}`}
+            title={`🎯 REQUISITO PRODUÇÃO: Botão NUNCA bloqueado por estado antigo. Loading=${loading}`}
           >
             {loading ? (
               <>
