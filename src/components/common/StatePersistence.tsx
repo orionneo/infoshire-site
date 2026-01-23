@@ -5,18 +5,25 @@ import { secureTabStorage } from '@/utils/secureTabStorage';
 /**
  * Componente para prevenir perda de estado quando o app é minimizado no mobile
  * Salva a rota atual e scroll position automaticamente
+ * ✅ Admin routes (#/admin/*) são sempre ignoradas e nunca restauradas
  */
 export function StatePersistence({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
 
+  // ✅ CRITICAL: Never restore or interfere with admin routes
+  const isAdminRoute = location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
+
   useEffect(() => {
+    // 🚫 Skip restoration for admin routes
+    if (isAdminRoute) return;
+
     // Restaurar posição de scroll e rota ao montar
     const savedRoute = secureTabStorage.getItem('app_last_route');
     const savedScrollY = secureTabStorage.getItem('app_scroll_y');
 
     if (savedRoute && savedRoute !== location.pathname) {
-      // Restaurar rota anterior
+      // Restaurar rota anterior (apenas se não for admin)
       navigate(savedRoute, { replace: true });
     }
 
@@ -31,7 +38,11 @@ export function StatePersistence({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (window.location.hash.startsWith('#/admin')) {
+    // 🚫 CRITICAL: Never save admin routes to sessionStorage
+    if (isAdminRoute) {
+      // Clear any saved admin state to prevent accidental restoration
+      secureTabStorage.removeItem('app_last_route');
+      secureTabStorage.removeItem('app_scroll_y');
       return;
     }
 
@@ -43,7 +54,7 @@ export function StatePersistence({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('Erro ao salvar estado de navegação:', error);
     }
-  }, [location.pathname]);
+  }, [location.pathname, isAdminRoute]);
 
   return <>{children}</>;
 }
