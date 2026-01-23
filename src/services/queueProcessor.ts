@@ -4,10 +4,9 @@
  * Garante retry inteligente e sem spam
  */
 
-import { getPendingOpsDB, PendingOp } from './pendingOps';
-import { createServiceOrder, uploadOrderImage } from '@/db/api';
+import { getPendingOpsDB, inMemoryPendingOps, PendingOp } from './pendingOps';
+import { createServiceOrder } from '@/db/api';
 import { logAiEvent, logAiError } from './debugLogger';
-import { getOrderImages, clearOrderImages } from './imageStorage';
 
 export type ProcessReason = 'app_start' | 'online' | 'visibility' | 'focus' | 'user_click' | 'interval';
 
@@ -43,8 +42,6 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
   const db = await getPendingOpsDB();
   
   try {
-    console.log(`[QueueProcessor] Processing op: ${op.opId}, attempt: ${op.attempts + 1}`);
-    
     await db.update(op.opId, {
       status: 'sending',
       lastAttemptAt: Date.now(),
@@ -57,38 +54,16 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
       attempt: op.attempts + 1,
     });
 
-    // Enviar para Supabase com timeout
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Timeout: 30s exceeded')), 30000)
-    );
+    // Enviar para Supabase com opção de abort
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
     try {
-      const order = await Promise.race([
-        createServiceOrder(op.payload),
-        timeoutPromise,
-      ]) as any;
+      const order = await createServiceOrder(op.payload, {
+        signal: controller.signal,
+      });
 
-      console.log(`[QueueProcessor] ✅ Order created:`, order.id, order.order_number);
-
-      // ✅ Upload de imagens (em background, não bloqueia)
-      const images = getOrderImages(op.order_number);
-      if (images.length > 0) {
-        console.log(`[QueueProcessor] 📸 Uploading ${images.length} images for order ${order.id}`);
-        (async () => {
-          try {
-            await Promise.all(
-              images.map((file, index) =>
-                uploadOrderImage(order.id, file, `Foto ${index + 1}`)
-              )
-            );
-            console.log(`[QueueProcessor] ✅ Images uploaded successfully`);
-          } catch (err) {
-            console.warn(`[QueueProcessor] ⚠️ Image upload failed (but order exists):`, err);
-          } finally {
-            clearOrderImages(op.order_number);
-          }
-        })();
-      }
+      clearTimeout(timeoutHandle);
 
       await db.update(op.opId, {
         status: 'done',
@@ -104,14 +79,11 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
 
       console.log(`✅ [QueueProcessor] Op done: ${op.opId}`);
     } catch (sendError: any) {
-      console.error(`[QueueProcessor] Order creation error:`, sendError);
-      // Limpar imagens se a OS falhou
-      clearOrderImages(op.order_number);
+      clearTimeout(timeoutHandle);
       throw sendError;
     }
   } catch (error: any) {
     const errorMsg = error?.message || String(error);
-    console.error(`[QueueProcessor] Error processing op ${op.opId}:`, errorMsg);
 
     await logAiError('QueueProcessor', error, {
       opId: op.opId,
@@ -157,6 +129,56 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
   }
 }
 
+async function processInMemoryOp(op: PendingOp, reason: ProcessReason): Promise<void> {
+  const now = Date.now();
+  op.status = 'sending';
+  op.lastAttemptAt = now;
+  op.attempts += 1;
+  op.updatedAt = now;
+
+  try {
+    await logAiEvent('QueueProcessor', 'send_start', {
+      opId: op.opId,
+      order_number: op.order_number,
+      attempt: op.attempts,
+      source: 'in_memory',
+    });
+
+    const order = await createServiceOrder(op.payload);
+
+    op.status = 'done';
+    op.order_id = order.id;
+    op.updatedAt = Date.now();
+
+    const index = inMemoryPendingOps.findIndex((item) => item.opId === op.opId);
+    if (index >= 0) {
+      inMemoryPendingOps.splice(index, 1);
+    }
+
+    await logAiEvent('QueueProcessor', 'send_success', {
+      opId: op.opId,
+      order_number: op.order_number,
+      order_id: order.id,
+      attempts: op.attempts,
+      source: 'in_memory',
+    });
+
+    console.log(`✅ [QueueProcessor] Op done (in-memory): ${op.opId}`);
+  } catch (error: any) {
+    const errorMsg = error?.message || String(error);
+    op.status = 'pending';
+    op.lastError = errorMsg;
+    op.updatedAt = Date.now();
+
+    await logAiError('QueueProcessor', error, {
+      opId: op.opId,
+      order_number: op.order_number,
+      attempt: op.attempts,
+      source: 'in_memory',
+    });
+  }
+}
+
 /**
  * Processa fila de operações pendentes
  * Chamado imediatamente ao voltar (focus, online, visibilitychange)
@@ -192,7 +214,28 @@ export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
 
   try {
     const db = await getPendingOpsDB();
-    const pending = await db.getAll('pending');
+    let pending: PendingOp[] = [];
+    let usedFallback = false;
+
+    try {
+      pending = await db.getAll('pending');
+    } catch (error) {
+      usedFallback = true;
+      pending = inMemoryPendingOps.slice();
+      await logAiError('PendingOps', error, {
+        reason,
+        fallback: 'in_memory',
+      });
+    }
+
+    if (!usedFallback && pending.length === 0 && inMemoryPendingOps.length > 0) {
+      usedFallback = true;
+      pending = inMemoryPendingOps.slice();
+      await logAiError('PendingOps', new Error('pending_ops_empty_using_in_memory'), {
+        reason,
+        fallback: 'in_memory',
+      });
+    }
 
     if (pending.length === 0) {
       console.log(`[QueueProcessor] No pending ops (reason: ${reason})`);
@@ -208,9 +251,10 @@ export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
 
     // Processar em paralelo (max 3 concurrent)
     const concurrent = 3;
+    const processFn = usedFallback ? processInMemoryOp : processOp;
     for (let i = 0; i < pending.length; i += concurrent) {
       const batch = pending.slice(i, i + concurrent);
-      await Promise.all(batch.map((op) => processOp(op, reason)));
+      await Promise.all(batch.map((op) => processFn(op, reason)));
     }
 
     await logAiEvent('QueueProcessor', 'process_done', {
