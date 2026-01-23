@@ -24,6 +24,8 @@ function AppShell() {
   // Mostra checagem de conexão APENAS em rotas autenticadas
   const showConnectionStatus = location.pathname.startsWith('/client') && !isAdminRoute;
 
+  // ✅ CRITICAL FIX: Admin routes MUST NOT respond to lifecycle events
+  // Lifecycle handlers disabled for admin to prevent session suspension
   useEffect(() => {
     // 🚫 Admin NÃO usa fila offline nem listeners de lifecycle
     if (isAdminRoute) return;
@@ -61,6 +63,7 @@ function AppShell() {
     };
   }, [isAdminRoute]);
 
+  // ✅ Disable autoSync listeners for admin routes
   useEffect(() => {
     if (!isAdminRoute && !autoSyncCleanupRef.current) {
       autoSyncCleanupRef.current = installAutoSyncListeners();
@@ -82,11 +85,35 @@ function AppShell() {
 
   return (
     <AuthProvider>
-      <StatePersistence>
+      {/* ✅ StatePersistence disabled for admin routes to prevent redirect loops on visibility change */}
+      {!isAdminRoute ? (
+        <StatePersistence>
+          <RouteGuard>
+            <ScrollToTop />
+            <IntersectObserver />
+            <AnalyticsTracker />
+            <GlobalGamerBackground />
+
+            <div className="flex flex-col min-h-screen relative z-10">
+              <main className="flex-grow">
+                <Routes>
+                  {routes.map((route, index) => (
+                    <Route key={index} path={route.path} element={route.element} />
+                  ))}
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Routes>
+              </main>
+            </div>
+
+            <PWAInstallPrompt />
+            {showConnectionStatus ? <ConnectionStatus enabled failThreshold={3} /> : null}
+            <Toaster />
+          </RouteGuard>
+        </StatePersistence>
+      ) : (
         <RouteGuard>
           <ScrollToTop />
           <IntersectObserver />
-          {!isAdminRoute ? <AnalyticsTracker /> : null}
           <GlobalGamerBackground />
 
           <div className="flex flex-col min-h-screen relative z-10">
@@ -101,10 +128,9 @@ function AppShell() {
           </div>
 
           <PWAInstallPrompt />
-          {showConnectionStatus ? <ConnectionStatus enabled failThreshold={3} /> : null}
           <Toaster />
         </RouteGuard>
-      </StatePersistence>
+      )}
     </AuthProvider>
   );
 }
