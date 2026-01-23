@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { getPendingOpsDB, PendingOp } from '@/services/pendingOps';
 import { processPendingQueue } from '@/services/queueProcessor';
-import { logDebug, getDebugEvents, getOpDebugTimeline } from '@/services/debugLogger';
+import { logAiEvent, getDebugEvents, getOpDebugTimeline } from '@/services/debugLogger';
 import type { DebugEvent } from '@/services/debugLogger';
 
 type ExpandedOp = Record<string, boolean>;
@@ -69,7 +69,7 @@ function AdminDebugPage() {
 
   const handleForceProcess = async () => {
     try {
-      await logDebug('force_process_start', { timestamp: Date.now() });
+      await logAiEvent('AdminDebug', 'force_process_start', { timestamp: Date.now() });
       toast({
         title: 'Processando fila',
         description: 'Tentando enviar todas as operações pendentes...',
@@ -97,7 +97,7 @@ function AdminDebugPage() {
       const db = await getPendingOpsDB();
       await db.clear();
       await loadData();
-      await logDebug('clear_all_pending', { timestamp: Date.now() });
+      await logAiEvent('AdminDebug', 'clear_all_pending', { timestamp: Date.now() });
       toast({
         title: 'Fila limpa',
         description: 'Todas as operações foram removidas.',
@@ -116,7 +116,7 @@ function AdminDebugPage() {
     try {
       const db = await getPendingOpsDB();
       await db.delete(opId);
-      await logDebug('delete_op', { opId, timestamp: Date.now() });
+      await logAiEvent('AdminDebug', 'delete_op', { opId, timestamp: Date.now() });
       await loadData();
       toast({
         title: 'Operação removida',
