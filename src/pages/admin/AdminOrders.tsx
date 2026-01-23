@@ -93,6 +93,11 @@ export default function AdminOrders() {
   const [isNewClient, setIsNewClient] = useState(false);
   const [hasMultipleItems, setHasMultipleItems] = useState(false);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  
+  // ✅ Refs para rastrear clicks e detectar travamento pós-background
+  const lastClickTimeRef = useRef<number>(0);
+  const creatingStartTimeRef = useRef<number>(0);
+  const creatingOpIdRef = useRef<string | null>(null);
   const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
   const [additionalItems, setAdditionalItems] = useState<
     Array<{
@@ -242,6 +247,99 @@ export default function AdminOrders() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // ✅ FIX: Detectar e resetar travamento pós-background
+  // Se `creating === true` há 5+ segundos sem que tenhamos uma op ativa em pendingOps
+  useEffect(() => {
+    if (!creating) return;
+
+    const interval = setInterval(async () => {
+      const elapsed = Date.now() - (creatingStartTimeRef.current || 0);
+      if (elapsed < 5000) return; // Esperar 5s mínimo
+
+      // Verificar se existe opId ativo
+      if (creatingOpIdRef.current) {
+        const db = await getPendingOpsDB();
+        const op = await db.getById(creatingOpIdRef.current);
+        
+        // Se op foi completada/errored/deletada → limpar estado
+        if (!op || ['done', 'error'].includes(op.status)) {
+          console.warn(
+            `[AdminOrders] ✅ Creating state reset: op ${creatingOpIdRef.current} already ${op?.status || 'gone'}`
+          );
+          logDebug('ui_creating_stuck_reset', {
+            opId: creatingOpIdRef.current,
+            opStatus: op?.status,
+            elapsedMs: elapsed,
+            reason: 'op_already_processed',
+          });
+          setCreating(false);
+          creatingOpIdRef.current = null;
+          creatingStartTimeRef.current = 0;
+        }
+      } else if (elapsed > 30000) {
+        // Se não temos opId mas creating ainda é true após 30s → reset de segurança
+        console.warn(`[AdminOrders] 🚨 Creating state forcefully reset after 30s with no opId`);
+        logDebug('ui_creating_stuck_reset', {
+          reason: 'safety_timeout_30s',
+          elapsedMs: elapsed,
+        });
+        setCreating(false);
+        creatingOpIdRef.current = null;
+        creatingStartTimeRef.current = 0;
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [creating]);
+
+  // ✅ FIX: Ao voltar de background (focus/visibility), resetar se creating está travado
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && creating) {
+        console.log('[AdminOrders] 👁️ Visibility changed to VISIBLE, creating=true. Checking state...');
+        const elapsed = Date.now() - (creatingStartTimeRef.current || 0);
+        
+        // Se creating está true mas haven't logged ou è muito tempo → reset
+        if (elapsed > 10000) {
+          console.warn(`[AdminOrders] 🔄 Resetting creating after visibility=visible, elapsed=${elapsed}ms`);
+          logDebug('ui_background_reset', {
+            elapsed,
+            reason: 'visibility_visible_long_elapsed',
+          });
+          setCreating(false);
+          creatingOpIdRef.current = null;
+          creatingStartTimeRef.current = 0;
+        }
+      }
+    };
+
+    const handleFocus = () => {
+      if (creating) {
+        console.log('[AdminOrders] 📍 Window focus event, creating=true. Checking state...');
+        const elapsed = Date.now() - (creatingStartTimeRef.current || 0);
+        
+        if (elapsed > 10000) {
+          console.warn(`[AdminOrders] 🔄 Resetting creating after focus, elapsed=${elapsed}ms`);
+          logDebug('ui_background_reset', {
+            elapsed,
+            reason: 'window_focus_long_elapsed',
+          });
+          setCreating(false);
+          creatingOpIdRef.current = null;
+          creatingStartTimeRef.current = 0;
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [creating]);
 
   useEffect(() => {
     filterOrders();
@@ -538,15 +636,56 @@ export default function AdminOrders() {
 
 
   const handleConfirmOrder = async () => {
-    if (import.meta.env.DEV) {
-      console.info('[ADMIN][OS] confirm click');
-    }
-    const data = pendingOrderRef.current ?? readDraftFromStorage();
+    const clickTime = Date.now();
+    const timeSinceLastClick = clickTime - lastClickTimeRef.current;
+    lastClickTimeRef.current = clickTime;
+    
+    // ✅ A) INSTRUMENTAÇÃO: Log do clique com TODOS os estados relevantes
+    const stateSnapshot = {
+      creating,
+      dialogOpen,
+      showConfirmation,
+      pendingOrderDataPresent: !!pendingOrderRef.current,
+      formValid: true, // TODO: check actual form validity
+      timestamp: new Date().toISOString(),
+      timeSinceLastClickMs: timeSinceLastClick,
+    };
+    
+    console.info('[AdminOrders] 🖱️ UI_CONFIRM_CLICK', stateSnapshot);
+    await logDebug('ui_confirm_click', stateSnapshot);
 
+    // ✅ Guard 1: Se creating === true, algo anterior não finalizou
+    if (creating) {
+      console.warn('[AdminOrders] ⚠️ UI_CONFIRM_BLOCKED: creating=true (já há criação em progresso)');
+      await logDebug('ui_confirm_blocked', {
+        reason: 'creating_already_true',
+        creatingDurationMs: Date.now() - (creatingStartTimeRef.current || 0),
+        creatingOpId: creatingOpIdRef.current,
+      });
+      toast({
+        title: 'Criação em andamento',
+        description: 'Aguarde a conclusão da ordem anterior.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // ✅ Guard 2: Se showConfirmation === false, dialog foi fechado (usuário clicou X)
+    if (!showConfirmation) {
+      console.warn('[AdminOrders] ⚠️ UI_CONFIRM_BLOCKED: showConfirmation=false (dialog foi fechado)');
+      await logDebug('ui_confirm_blocked', {
+        reason: 'dialog_not_open',
+      });
+      return;
+    }
+
+    // ✅ Guard 3: Draft data ausente
+    const data = pendingOrderRef.current ?? readDraftFromStorage();
     if (!data) {
-      if (import.meta.env.DEV) {
-        console.info('[ADMIN][OS] confirm blocked: missing draft');
-      }
+      console.warn('[AdminOrders] ⚠️ UI_CONFIRM_BLOCKED: no draft data');
+      await logDebug('ui_confirm_blocked', {
+        reason: 'no_draft_data',
+      });
       toast({
         title: 'Dados da OS não encontrados',
         description: 'Não foi possível recuperar o rascunho. Revise a confirmação e tente novamente.',
@@ -556,11 +695,19 @@ export default function AdminOrders() {
       return;
     }
 
-    setPendingOrderData(data);
-    pendingOrderRef.current = data;
-
+    // ✅ Marcar inicio de criação e gerar opId
     const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const orderNumber = generateOrderNumber();
+    
+    creatingOpIdRef.current = opId;
+    creatingStartTimeRef.current = Date.now();
+    
+    console.info(`[AdminOrders] ✅ PROCEEDING with handleConfirmOrder`, {
+      opId,
+      orderNumber,
+      timestamp: new Date().toISOString(),
+    });
+    await logDebug('ui_confirm_proceed', { opId, orderNumber });
     
     // ✅ OFFLINE-FIRST: Enfileirar operação no IndexedDB ANTES de enviar
     await logDebug('enqueue_start', { opId, orderNumber });
@@ -602,6 +749,7 @@ export default function AdminOrders() {
 
       // ✅ ENFILEIRAR no IndexedDB
       await createPendingOp(opId, orderNumber, payload);
+      console.info(`[AdminOrders] ✅ Enqueued in IndexedDB`, { opId, orderNumber });
       await logDebug('enqueue_done', { opId, orderNumber });
 
       // ✅ IMPERCEPTÍVEL: Toast não-bloqueante, não mostra "Criando..."
@@ -620,6 +768,7 @@ export default function AdminOrders() {
       }
 
       // ✅ Reset total do estado (ANTES de processar)
+      console.info(`[AdminOrders] 🔄 Resetting UI state after enqueue`, { opId });
       setShowConfirmation(false);
       setDialogOpen(false);
       form.reset();
@@ -629,6 +778,10 @@ export default function AdminOrders() {
       setSelectedImages([]);
       setPendingOrderData(null);
       setCreating(false);
+
+      // Clear refs
+      creatingOpIdRef.current = null;
+      creatingStartTimeRef.current = 0;
 
       // ✅ DISPARAR processamento imediatamente (não-bloqueante)
       console.log(`[AdminOrders] 🚀 ENQUEUED ${opId}, triggering queue processing...`);
@@ -650,7 +803,10 @@ export default function AdminOrders() {
         variant: 'destructive',
       });
 
+      // Reset no erro também
       setCreating(false);
+      creatingOpIdRef.current = null;
+      creatingStartTimeRef.current = 0;
     }
   };
 

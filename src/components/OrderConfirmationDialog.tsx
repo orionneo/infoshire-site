@@ -314,6 +314,10 @@ export function OrderConfirmationDialog({
             onClick={onConfirm}
             disabled={loading && !forceEnabled}
             className="min-w-[140px]"
+            data-testid="confirm-button"
+            data-disabled={loading && !forceEnabled ? 'true' : 'false'}
+            data-loading={loading ? 'true' : 'false'}
+            title={`Button state: loading=${loading}, forceEnabled=${forceEnabled}, disabled=${loading && !forceEnabled}`}
           >
             {loading ? (
               <>
