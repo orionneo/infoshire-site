@@ -18,8 +18,9 @@ export function AnalyticsTracker() {
   const location = useLocation();
   const path = currentRoutePath(location);
 
-  // ✅ Nunca rodar analytics no admin
-  if (path.startsWith('/admin')) return null;
+  // 🚫 CRITICAL: Never run analytics in admin - check both hash and pathname
+  const isAdminRoute = path.startsWith('/admin') || location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
+  if (isAdminRoute) return null;
   const initialized = useRef(false);
 
   const enabled = ANALYTICS_ENABLED && shouldRunAnalytics();

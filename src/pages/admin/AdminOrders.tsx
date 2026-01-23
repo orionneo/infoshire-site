@@ -73,13 +73,8 @@ export default function AdminOrders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [tabStorageEnabled, setTabStorageEnabled] = useState(() => {
-    try {
-      return !secureTabStorage.isBlocked();
-    } catch (e) {
-      return false;
-    }
-  });
+  // 🚫 ADMIN: Storage is ALWAYS disabled - never use it
+  const [tabStorageEnabled] = useState(false);
 
   // Ler filtros da URL ao carregar
   useEffect(() => {
