@@ -20,6 +20,8 @@ export interface PendingOp {
   order_id?: string;
 }
 
+export const inMemoryPendingOps: PendingOp[] = [];
+
 const DB_NAME = 'infoshire_admin_db';
 const STORE_NAME = 'pending_ops';
 const DB_VERSION = 1;
@@ -225,7 +227,13 @@ export async function createPendingOp(
     console.log(`[PendingOps] Enqueued: ${opId}`);
     return op;
   } catch (err) {
-    await logAiError('PendingOps', err, { opId, order_number, reason: 'enqueue_failed' });
-    throw err;
+    inMemoryPendingOps.push(op);
+    await logAiError('PendingOps', err, {
+      opId,
+      order_number,
+      reason: 'enqueue_failed_fallback',
+      fallback: 'in_memory',
+    });
+    return op;
   }
 }
