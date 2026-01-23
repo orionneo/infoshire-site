@@ -106,7 +106,6 @@ export default function AdminOrders() {
     try {
       const stored = secureTabStorage.setItem(key, value);
       if (!stored) {
-        setTabStorageEnabled(false);
         return false;
       }
       return true;
@@ -560,6 +559,10 @@ export default function AdminOrders() {
     const startedAt = Date.now();
     setCreating(true);
     const orderNumber = generateOrderNumber();
+    
+    // ✅ Criar AbortController para controlar a requisição
+    const controller = new AbortController();
+    
     // ⚠️ NÃO salvar em storage durante criação - Firefox bloqueia quando aba backgroundada
     // Usar APENAS memória (creatingSessionRef) como fallback
     creatingSessionRef.current = {
@@ -570,15 +573,17 @@ export default function AdminOrders() {
     };
 
     // ✅ CRITICAL FIX: Hard timeout (60 seconds) - SIMPLE and ROBUST
-    // NEVER try to access storage/backend inside timeout callback
+    // Conectar timeout ao AbortController
     // Firefox blocks everything when tab is backgrounded for 15s+
     console.log(`[AdminOrders] Starting order creation with 60s timeout (opId: ${opId})`);
     const timeoutHandle = window.setTimeout(() => {
       if (!creatingSessionRef.current?.resolved) {
-        console.warn(`⏱️ Order creation timeout AFTER 60s (${opId}). Releasing UI...`);
+        console.warn(`⏱️ Order creation timeout AFTER 60s (${opId}). Aborting request...`);
         if (creatingSessionRef.current) {
           creatingSessionRef.current.resolved = true;
         }
+        // ✅ Abortar a requisição
+        controller.abort();
         // ✅ IMMEDIATELY release the UI - user can try again
         setCreating(false);
         // Simple message - user will know timeout occurred
@@ -626,7 +631,8 @@ export default function AdminOrders() {
                 description: it.description || undefined,
               }))
             : undefined,
-        }
+        },
+        { signal: controller.signal }
       );
       if (import.meta.env.DEV) {
         console.info('[ADMIN][OS] createServiceOrder resolved', { orderId: order.id });
