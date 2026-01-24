@@ -266,45 +266,50 @@ export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
 
 /**
  * Setup auto-processing triggers
- * Chamar uma vez ao iniciar a app
+ * Returns cleanup function to remove all listeners
  */
-export function setupQueueProcessing(): void {
-  // 🚫 HARD GUARD: NEVER run queue processing in /admin routes
-  const isAdminRoute = location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
-  if (isAdminRoute) {
-    console.debug('[QueueProcessor] Skipped in admin route');
-    return;
-  }
-
+export function setupQueueProcessing(): () => void {
   console.log('[QueueProcessor] Setting up auto-processing triggers');
 
   // 1. App startup
   processPendingQueue({ reason: 'app_start' }).catch(console.error);
 
   // 2. Online event
-  window.addEventListener('online', () => {
+  const onOnline = () => {
     console.log('[QueueProcessor] Online event detected');
     processPendingQueue({ reason: 'online' }).catch(console.error);
-  });
+  };
+  window.addEventListener('online', onOnline);
 
   // 3. Visibility change (voltou da aba)
-  document.addEventListener('visibilitychange', () => {
+  const onVisibilityChange = () => {
     if (!document.hidden) {
       console.log('[QueueProcessor] Visibility changed: visible');
       processPendingQueue({ reason: 'visibility' }).catch(console.error);
     }
-  });
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
 
   // 4. Focus event
-  window.addEventListener('focus', () => {
+  const onFocus = () => {
     console.log('[QueueProcessor] Focus event detected');
     processPendingQueue({ reason: 'focus' }).catch(console.error);
-  });
+  };
+  window.addEventListener('focus', onFocus);
 
   // 5. Interval fallback (15s) - caso os eventos acima não funcionem
-  setInterval(() => {
+  const intervalId = setInterval(() => {
     processPendingQueue({ reason: 'interval' }).catch(console.error);
   }, 15000);
+
+  // Return cleanup function
+  return () => {
+    console.log('[QueueProcessor] Cleaning up listeners');
+    window.removeEventListener('online', onOnline);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    window.removeEventListener('focus', onFocus);
+    clearInterval(intervalId);
+  };
 }
 
 /**

@@ -37,6 +37,7 @@ function AdminShell() {
 
 function NonAdminShell({ showConnectionStatus }: { showConnectionStatus: boolean }) {
   const autoSyncCleanupRef = useRef<null | (() => void)>(null);
+  const queueCleanupRef = useRef<null | (() => void)>(null);
 
   useEffect(() => {
     const drain = () => {
@@ -87,7 +88,14 @@ function NonAdminShell({ showConnectionStatus }: { showConnectionStatus: boolean
 
   useEffect(() => {
     console.log('[App] Setting up queue processing listeners...');
-    setupQueueProcessing();
+    queueCleanupRef.current = setupQueueProcessing();
+
+    return () => {
+      if (queueCleanupRef.current) {
+        queueCleanupRef.current();
+        queueCleanupRef.current = null;
+      }
+    };
   }, []);
 
   return (
