@@ -4,28 +4,40 @@ import "./index.css";
 import { AppWrapper } from "./components/common/PageMeta.tsx";
 
 /**
- * ✅ CRITICAL: Dynamic entrypoint to prevent Admin from loading queue code
+ * ✅ CRITICAL: Dynamic entrypoint + BOUNDARY RELOAD
+ * 
+ * Problem: If user navigates from public site to /#/admin without reload,
+ * they stay in AppPublic and queueProcessor keeps running.
+ * 
+ * Solution: Monitor hash changes and force reload when crossing boundary.
  * 
  * Admin routes MUST use AppAdmin (no queue imports)
  * Public routes use AppPublic (with queue logic)
- * 
- * This ensures Admin bundle is tree-shaken and does NOT include:
- * - queueProcessor
- * - processOfflineQueue
- * - pendingOps
- * - IndexedDB side effects
  */
 
-// Force rebuild - v99 - Hard split: Admin vs Public entrypoints
+// Force rebuild - v100 - Boundary reload: force correct entrypoint
 
-const isAdminRoute = 
-  window.location.hash.startsWith('#/admin') || 
-  window.location.pathname.startsWith('/admin');
+function isAdminRoute(hash: string = window.location.hash) {
+  return hash.startsWith('#/admin') || window.location.pathname.startsWith('/admin');
+}
+
+let currentMode: 'admin' | 'public' = isAdminRoute() ? 'admin' : 'public';
+
+// ✅ BOUNDARY RELOAD: Watch for route boundary crossing
+window.addEventListener('hashchange', () => {
+  const nowAdmin = isAdminRoute();
+  const newMode = nowAdmin ? 'admin' : 'public';
+  
+  if (newMode !== currentMode) {
+    console.log(`[BoundaryReload] Crossing ${currentMode} → ${newMode}, reloading...`);
+    window.location.reload();
+  }
+});
 
 async function bootstrap() {
   const root = createRoot(document.getElementById("root")!);
 
-  if (isAdminRoute) {
+  if (currentMode === 'admin') {
     // ✅ Admin: Load clean bundle without queue code
     const { AppAdmin } = await import('./AppAdmin.tsx');
     

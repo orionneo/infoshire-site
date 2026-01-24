@@ -54,36 +54,43 @@ export async function logAiEvent(
   eventType: string,
   snapshot?: any
 ): Promise<void> {
+  // ✅ Admin: No-op
   if (isAdminRoute()) {
     if (isDevMode) console.debug(`[${functionName}] ${eventType}`, snapshot);
     return;
   }
+  
   if (isDevMode) {
     console.info(`[${functionName}] ${eventType}`, snapshot);
   }
 
-  // Best-effort: tenta logar mas nunca quebra
-  try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData?.session?.user?.id;
-
-    const payload: AiLogPayload = {
-      function_name: functionName,
-      error_message: eventType,
-      input_snapshot: snapshot || {},
-      user_id: userId || null,
-      os_id: snapshot?.os_id || null,
-    };
-
-    // Fire-and-forget: tenta mas não quebra
+  // ✅ CRITICAL: Don't block on async session check or insert
+  // Fire-and-forget in microtask
+  void Promise.resolve().then(async () => {
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      
+      // ✅ No session = no log (avoid 401)
+      if (!sessionData?.session?.access_token) {
+        return;
+      }
+      
+      const userId = sessionData.session.user?.id;
+
+      const payload: AiLogPayload = {
+        function_name: functionName,
+        error_message: eventType,
+        input_snapshot: snapshot || {},
+        user_id: userId || null,
+        os_id: snapshot?.os_id || null,
+      };
+
       await supabase.from('ai_errors').insert([payload]);
-    } catch (insertErr) {
-      if (isDevMode) console.warn(`[${functionName}] Log failed (ignored):`, insertErr);
+    } catch (error) {
+      // Completely silent - never block UI
+      if (isDevMode) console.debug(`[${functionName}] Log skipped:`, error);
     }
-  } catch (error) {
-    if (isDevMode) console.warn(`[${functionName}] Log error (ignored):`, error);
-  }
+  });
 }
 
 /**
@@ -97,10 +104,12 @@ export async function logAiError(
   err: unknown,
   snapshot?: any
 ): Promise<void> {
+  // ✅ Admin: No-op
   if (isAdminRoute()) {
     if (isDevMode) console.debug(`[${functionName}] Error (admin suppressed)`, err, snapshot);
     return;
   }
+  
   const errorMsg = err instanceof Error ? err.message : String(err);
   const errorStack = err instanceof Error ? err.stack : undefined;
 
@@ -108,29 +117,34 @@ export async function logAiError(
     console.error(`[${functionName}] Error:`, errorMsg, snapshot);
   }
 
-  // Best-effort: tenta logar mas nunca quebra
-  try {
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData?.session?.user?.id;
-
-    const payload: AiLogPayload = {
-      function_name: functionName,
-      error_message: errorMsg,
-      error_stack: errorStack || null,
-      input_snapshot: snapshot || {},
-      user_id: userId || null,
-      os_id: snapshot?.os_id || null,
-    };
-
-    // Fire-and-forget: tenta mas não quebra
+  // ✅ CRITICAL: Don't block on async session check or insert
+  // Fire-and-forget in microtask
+  void Promise.resolve().then(async () => {
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      
+      // ✅ No session = no log (avoid 401)
+      if (!sessionData?.session?.access_token) {
+        return;
+      }
+      
+      const userId = sessionData.session.user?.id;
+
+      const payload: AiLogPayload = {
+        function_name: functionName,
+        error_message: errorMsg,
+        error_stack: errorStack || null,
+        input_snapshot: snapshot || {},
+        user_id: userId || null,
+        os_id: snapshot?.os_id || null,
+      };
+
       await supabase.from('ai_errors').insert([payload]);
-    } catch (insertErr) {
-      if (isDevMode) console.warn(`[${functionName}] Error log failed (ignored):`, insertErr);
+    } catch (error) {
+      // Completely silent - never block UI
+      if (isDevMode) console.debug(`[${functionName}] Error log skipped:`, error);
     }
-  } catch (error) {
-    if (isDevMode) console.warn(`[${functionName}] Error log catch (ignored):`, error);
-  }
+  });
 }
 
 // Backward compat: logDebug agora é alias para logAiEvent

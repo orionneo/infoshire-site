@@ -46,6 +46,7 @@ export default function AdminOrders() {
   const [filteredOrders, setFilteredOrders] = useState<ServiceOrderWithClient[]>([]);
   const [clients, setClients] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
@@ -119,18 +120,28 @@ export default function AdminOrders() {
 
   const loadData = useCallback(async () => {
     try {
+      setLoading(true);
+      setLoadError(null);
       const [ordersData, clientsData] = await Promise.all([getAllServiceOrders(), getAllProfiles()]);
       setOrders(ordersData);
       setClients(clientsData.filter((c) => c.role === 'client'));
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
-      // Silent fallback: set empty arrays rather than blocking UI
+      const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
+      setLoadError(`Falha ao carregar dados: ${errorMsg}`);
+      // Set empty arrays to allow UI to render
       setOrders([]);
       setClients([]);
+      
+      toast({
+        title: 'Erro ao carregar dados',
+        description: 'Não foi possível carregar ordens e clientes. Tente novamente.',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     loadData();
@@ -415,6 +426,22 @@ export default function AdminOrders() {
         <div className="flex items-center justify-center h-64">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
+      </AdminLayout>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <AdminLayout>
+        <Card>
+          <CardContent className="flex flex-col items-center justify-center py-12 space-y-4">
+            <p className="text-lg font-medium text-destructive">Erro ao carregar dados</p>
+            <p className="text-sm text-muted-foreground">{loadError}</p>
+            <Button onClick={loadData}>
+              Tentar novamente
+            </Button>
+          </CardContent>
+        </Card>
       </AdminLayout>
     );
   }
