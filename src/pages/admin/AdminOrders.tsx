@@ -1,47 +1,30 @@
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Loader2, Plus, Search, Trash2, UserPlus, X, ChevronDown, ChevronUp } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
 import { OrderStatusBadge, statusConfig } from '@/components/OrderStatusBadge';
-import { AIOpeningAssistant } from '@/components/AIOpeningAssistant';
-import WebSearchAssistant from '@/components/WebSearchAssistant';
 import { OrderConfirmationDialog } from '@/components/OrderConfirmationDialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { MultipleImageUpload } from '@/components/ui/MultipleImageUpload';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Separator } from '@/components/ui/separator';
 import { SmartInput } from '@/components/ui/SmartInput';
 import { SmartTextarea } from '@/components/ui/SmartTextarea';
 import { Textarea } from '@/components/ui/textarea';
-import { createClientProfile, createServiceOrder, generateOrderNumber, getAllProfiles, getAllServiceOrders, getServiceOrderByOrderNumber, uploadOrderImage } from '@/db/api';
-import { loadAdminCache, saveAdminCache } from '@/utils/adminCache';
-import { safeStorage } from '@/utils/safeStorage';
-import { secureTabStorage } from '@/utils/secureTabStorage';
+import { createClientProfile, createServiceOrder, generateOrderNumber, getAllProfiles, getAllServiceOrders, uploadOrderImage } from '@/db/api';
 import { useToast } from '@/hooks/use-toast';
-import { createPendingOp, getPendingOpsDB } from '@/services/pendingOps';
-import { processPendingQueue, setupQueueProcessing } from '@/services/queueProcessor';
-import { setOrderImages, getOrderImages, clearOrderImages } from '@/services/imageStorage';
-import { logAiEvent, logAiError } from '@/services/debugLogger';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
 
-// Chave para salvar o rascunho do formulário
-const FORM_DRAFT_KEY = 'admin_order_form_draft';
-const PENDING_CONFIRMATION_KEY = 'admin_order_pending_confirmation';
 type OrderDraft = Record<string, any>;
-type CreatingSession = {
-  orderNumber: string;
-  startedAt: number;
-  opId: string;
-  resolved: boolean;
-};
 
 // Helpers para input type="date" + ISO estável sem bug de timezone
 const toDateInput = (d: Date) => {
@@ -50,7 +33,6 @@ const toDateInput = (d: Date) => {
 };
 
 const dateInputToLocalISOString = (dateStr: string) => {
-  // Usa meio-dia local para não “virar dia” em UTC
   const d = new Date(`${dateStr}T12:00:00`);
   const tzAdjusted = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
   return tzAdjusted.toISOString();
@@ -60,8 +42,6 @@ export default function AdminOrders() {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
-  const creatingSessionRef = useRef<CreatingSession | null>(null);
-  const pendingOrderRef = useRef<OrderDraft | null>(null);
   const [orders, setOrders] = useState<ServiceOrderWithClient[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<ServiceOrderWithClient[]>([]);
   const [clients, setClients] = useState<Profile[]>([]);
@@ -69,10 +49,9 @@ export default function AdminOrders() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  // 🚫 ADMIN: Storage is ALWAYS disabled - never use it
-  const [tabStorageEnabled] = useState(false);
+  const [clientSearch, setClientSearch] = useState('');
+  const [clientComboboxOpen, setClientComboboxOpen] = useState(false);
 
-  // Ler filtros da URL ao carregar
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const status = params.get('status');
@@ -86,7 +65,6 @@ export default function AdminOrders() {
   const [isNewClient, setIsNewClient] = useState(false);
   const [hasMultipleItems, setHasMultipleItems] = useState(false);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
-  const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
   const [additionalItems, setAdditionalItems] = useState<
     Array<{
       id: string;
@@ -98,142 +76,59 @@ export default function AdminOrders() {
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [pendingOrderData, setPendingOrderData] = useState<any>(null);
 
-  const saveTabStorageItem = useCallback((key: string, value: string) => {
-    try {
-      const stored = secureTabStorage.setItem(key, value);
-      if (!stored) {
-        return false;
-      }
-      return true;
-    } catch (error) {
-      // Firefox Tracking Prevention blocks storage when tab backgrounded
-      // Silently ignore - admin must continue working even without storage
-      return false;
-    }
-  }, []);
-
-
   const form = useForm({
     defaultValues: {
       client_id: '',
-      // New client fields
       new_client_first_name: '',
       new_client_last_name: '',
       new_client_email: '',
       new_client_phone: '',
       new_client_password: '123456',
-
-      // Order fields (todos do ServiceOrder)
       entry_date: '',
       equipment: '',
       serial_number: '',
       equipment_photo_url: '',
       problem_description: '',
-      estimated_completion: '',
-      status: '',
-      discount_amount: '',
-      discount_reason: '',
-      completed_at: '',
       has_multiple_items: false,
-      order_number: '',
-      // Adicione outros campos do ServiceOrder conforme o schema
     },
   });
 
-  // Restaurar rascunho do formulário ao abrir o diálogo
   useEffect(() => {
     if (!dialogOpen) return;
-
-    let savedDraft: string | null = null;
-    try {
-      savedDraft = secureTabStorage.getItem(FORM_DRAFT_KEY);
-    } catch (e) {
-      // Storage blocked - ignore
-    }
-    
-    if (savedDraft) {
-      try {
-        const draft = JSON.parse(savedDraft);
-        form.reset(draft);
-        toast({
-          title: 'Rascunho restaurado',
-          description: 'Seus dados foram recuperados automaticamente',
-        });
-        return;
-      } catch (error) {
-        console.warn('Erro ao restaurar rascunho:', error);
-      }
-    }
-
-    // ✅ Novo formulário: garante que não “herda” dados da última OS
     form.reset();
     setIsNewClient(false);
     setHasMultipleItems(false);
     setAdditionalItems([]);
     setSelectedImages([]);
-  }, [dialogOpen]);
+  }, [dialogOpen, form]);
 
-  // ✅ Garantir default do entry_date = hoje, se não vier do draft
   useEffect(() => {
     if (!dialogOpen) return;
     const current = form.getValues('entry_date');
     if (!current) {
       form.setValue('entry_date', toDateInput(new Date()), { shouldDirty: true });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dialogOpen]);
+  }, [dialogOpen, form]);
 
-  // Check if we should open dialog from navigation state
   useEffect(() => {
     if (location.state?.openDialog) {
       setDialogOpen(true);
-      // Clear the state
       navigate(location.pathname, { replace: true, state: {} });
     }
   }, [location.state, navigate, location.pathname]);
 
-  // Auto-salvar formulário a cada mudança (APENAS se não estiver criando e storage disponível)
-  useEffect(() => {
-    if (!dialogOpen || !tabStorageEnabled || creating) return; // 🔥 Nunca salvar durante criação
-
-    const subscription = form.watch((values) => {
-      saveTabStorageItem(FORM_DRAFT_KEY, JSON.stringify(values));
-    });
-
-    return () => subscription.unsubscribe();
-  }, [dialogOpen, form, saveTabStorageItem, tabStorageEnabled, creating]);
-
   const loadData = useCallback(async () => {
     try {
       const [ordersData, clientsData] = await Promise.all([getAllServiceOrders(), getAllProfiles()]);
-
       setOrders(ordersData);
       setClients(clientsData.filter((c) => c.role === 'client'));
-
-      // ✅ cache para modo offline
-      saveAdminCache({
-        orders: ordersData,
-        clients: clientsData,
-      });
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
-
-      // ✅ fallback offline
-      const cache = loadAdminCache();
-      if (cache) {
-        setOrders(cache.orders);
-        setClients(cache.clients.filter((c: any) => c.role === 'client'));
-        toast({
-          title: 'Modo offline',
-          description: 'Carreguei dados do cache local. Novas OS/imagens serão sincronizadas ao voltar a conexão.',
-        });
-      } else {
-        toast({
-          title: 'Sem conexão',
-          description: 'Você está offline e ainda não existe cache local neste dispositivo.',
-          variant: 'destructive',
-        });
-      }
+      toast({
+        title: 'Erro ao carregar dados',
+        description: 'Não foi possível carregar as ordens. Verifique a conexão e tente novamente.',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
@@ -242,10 +137,10 @@ export default function AdminOrders() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
   useEffect(() => {
     filterOrders();
   }, [orders, searchTerm, statusFilter]);
-
 
   const resetCreationForm = useCallback(() => {
     setShowConfirmation(false);
@@ -256,131 +151,42 @@ export default function AdminOrders() {
     setAdditionalItems([]);
     setSelectedImages([]);
     setPendingOrderData(null);
-    pendingOrderRef.current = null;
-    try {
-      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
-    } catch (e) {
-      // Storage blocked - ignore
-    }
   }, [form]);
 
   const finalizeCreationSuccess = useCallback(
-    async (order: { order_number?: string; id: string }, source: string) => {
-      if (creatingSessionRef.current) {
-        creatingSessionRef.current.resolved = true;
-      }
-
+    (order: { order_number?: string; id: string }, source: string) => {
       setCreating(false);
       toast({
         title: 'Ordem criada',
         description: `OS ${order.order_number || order.id}${source ? ` (${source})` : ''}`,
       });
-
-      try {
-        safeStorage.removeItem(FORM_DRAFT_KEY);
-        safeStorage.removeItem('ORDER_DRAFT_FALLBACK');
-      } catch (e) {
-        // Storage blocked - ignore
-      }
-
       resetCreationForm();
-      // 🚫 REMOVED: await loadData() - causes timeout when tab backgrounded
-      // Order is created in Supabase, user will see it on next page refresh
-      // Don't block UI waiting for data reload
     },
     [resetCreationForm, toast]
   );
 
   const finalizeCreationError = useCallback(
     (message: string) => {
-      if (creatingSessionRef.current) {
-        creatingSessionRef.current.resolved = true;
-      }
-
       setCreating(false);
       toast({
         title: 'Erro ao criar OS',
         description: message,
         variant: 'destructive',
       });
-
-      if (pendingOrderRef.current) {
-        try {
-          safeStorage.setItem('ORDER_DRAFT_FALLBACK', JSON.stringify(pendingOrderRef.current));
-        } catch (e) {
-          // Storage blocked - ignore
-        }
-      }
       setPendingOrderData(null);
-      pendingOrderRef.current = null;
-      try {
-        secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
-      } catch (e) {
-        // Storage blocked - ignore
-      }
     },
     [toast]
   );
 
-  const readDraftFromStorage = useCallback(() => {
-    let draftValue: string | null = null;
-    try {
-      draftValue = secureTabStorage.getItem(PENDING_CONFIRMATION_KEY) ||
-        secureTabStorage.getItem('ORDER_DRAFT_FALLBACK') ||
-        secureTabStorage.getItem(FORM_DRAFT_KEY) ||
-        safeStorage.getItem(PENDING_CONFIRMATION_KEY) ||
-        safeStorage.getItem('ORDER_DRAFT_FALLBACK') ||
-        safeStorage.getItem(FORM_DRAFT_KEY);
-    } catch (e) {
-      // Storage blocked - ignore
-    }
-    if (!draftValue) return null;
-
-    try {
-      return JSON.parse(draftValue) as OrderDraft;
-    } catch (error) {
-      console.warn('Erro ao restaurar rascunho da OS:', error);
-      return null;
-    }
+  const handleConfirmationOpenChange = useCallback((open: boolean) => {
+    if (open) setCreating(false);
+    setShowConfirmation(open);
   }, []);
-
-  const restorePendingConfirmation = useCallback(() => {
-    const pending = readDraftFromStorage();
-    if (!pending) {
-      try {
-        secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
-      } catch (e) {
-        // Storage blocked - ignore
-      }
-      return;
-    }
-
-    setPendingOrderData(pending);
-    pendingOrderRef.current = pending;
-  }, [readDraftFromStorage]);
-
-  const handleConfirmationOpenChange = useCallback(
-    (open: boolean) => {
-      if (open) {
-        setCreating(false);
-        restorePendingConfirmation();
-      }
-      setShowConfirmation(open);
-    },
-    [restorePendingConfirmation]
-  );
 
   const handleConfirmationCancel = useCallback(() => {
     setPendingOrderData(null);
-    pendingOrderRef.current = null;
-    try {
-      secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
-    } catch (e) {
-      // Storage blocked - ignore
-    }
     setShowConfirmation(false);
   }, []);
-
 
   const filterOrders = () => {
     let filtered = [...orders];
@@ -396,7 +202,6 @@ export default function AdminOrders() {
     }
 
     if (statusFilter !== 'all') {
-      // Handle special filters
       if (statusFilter === 'in_progress') {
         filtered = filtered.filter((order) => ['analyzing', 'in_repair', 'awaiting_parts'].includes(order.status));
       } else if (statusFilter === 'completed') {
@@ -408,6 +213,13 @@ export default function AdminOrders() {
 
     setFilteredOrders(filtered);
   };
+
+  const filteredClients = clients.filter((client) => {
+    const q = clientSearch.trim().toLowerCase();
+    if (!q) return true;
+    const haystack = [client.name, client.email, client.phone].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(q);
+  });
 
   // Funções para gerenciar itens adicionais
   const addAdditionalItem = () => {
@@ -522,27 +334,13 @@ export default function AdminOrders() {
 
     // Todas as validações passaram - mostrar confirmação
     setPendingOrderData(data);
-    pendingOrderRef.current = data;
-    // ⚠️ Não depender de storage - apenas usar memória (pendingOrderRef)
-    // Storage é bloqueado por Firefox Tracking Prevention quando aba backgroundada
-    try {
-      saveTabStorageItem('ORDER_DRAFT_FALLBACK', JSON.stringify(data));
-      saveTabStorageItem(PENDING_CONFIRMATION_KEY, JSON.stringify(data));
-    } catch (e) {
-      if (import.meta.env.DEV) console.warn('Storage blocked during validation (continuing):', e);
-      // Continua mesmo se storage falhar - dados estão em memory
-    }
     setShowConfirmation(true);
   };
 
 
   const handleConfirmOrder = async () => {
-    // 🎯 REQUISITO PRODUÇÃO: TODO clique feedback IMEDIATO, botão NUNCA bloqueado por estado antigo
-    console.info('[AdminOrders] 🖱️ UI_CONFIRM_CLICK_ALWAYS - Initiating order creation');
-    await logAiEvent('AdminOrders', 'ui_confirm_click_always', { timestamp: new Date().toISOString() });
-
     try {
-      const data = pendingOrderRef.current ?? readDraftFromStorage();
+      const data = pendingOrderData as OrderDraft | null;
       if (!data) {
         setCreating(false);
         toast({
@@ -565,7 +363,6 @@ export default function AdminOrders() {
         clientId = newClient.id;
       }
 
-      // Monta payload completo
       const payload = {
         client_id: clientId,
         entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
@@ -583,22 +380,17 @@ export default function AdminOrders() {
           : undefined,
       };
 
-      // Criação resiliente: nunca cancela, sempre finaliza
-      let createdOrder = null;
       try {
-        createdOrder = await createServiceOrder(payload);
-        // Upload resiliente: tenta upload, mas não trava criação
+        const createdOrder = await createServiceOrder(payload);
         if (selectedImages.length > 0) {
           for (const file of selectedImages) {
-            try {
-              await uploadOrderImage(createdOrder.id, file);
-            } catch (e) {
+            uploadOrderImage(createdOrder.id, file).catch(() => {
               toast({
                 title: 'Falha ao enviar imagem',
                 description: 'A OS foi criada, mas uma ou mais imagens não foram enviadas.',
                 variant: 'destructive',
               });
-            }
+            });
           }
         }
         finalizeCreationSuccess(createdOrder, 'admin');
@@ -669,26 +461,60 @@ export default function AdminOrders() {
                         control={form.control}
                         name="client_id"
                         rules={{ required: 'Cliente é obrigatório' }}
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Selecionar Cliente</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value}>
-                              <FormControl>
-                                <SelectTrigger>
-                                  <SelectValue placeholder="Selecione o cliente" />
-                                </SelectTrigger>
-                              </FormControl>
-                              <SelectContent>
-                                {clients.map((client) => (
-                                  <SelectItem key={client.id} value={client.id}>
-                                    {client.name || client.email} {client.phone && `- ${client.phone}`}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                            <FormMessage />
-                          </FormItem>
-                        )}
+                        render={({ field }) => {
+                          const selected = clients.find((c) => c.id === field.value);
+                          return (
+                            <FormItem>
+                              <FormLabel>Selecionar Cliente</FormLabel>
+                              <Popover open={clientComboboxOpen} onOpenChange={setClientComboboxOpen}>
+                                <PopoverTrigger asChild>
+                                  <FormControl>
+                                    <Button
+                                      variant="outline"
+                                      role="combobox"
+                                      className="justify-between"
+                                    >
+                                      {selected ? (selected.name || selected.email) : 'Selecione o cliente'}
+                                    </Button>
+                                  </FormControl>
+                                </PopoverTrigger>
+                                <PopoverContent className="p-0" align="start">
+                                  <Command>
+                                    <CommandInput
+                                      placeholder="Buscar por nome, email ou telefone..."
+                                      value={clientSearch}
+                                      onValueChange={setClientSearch}
+                                    />
+                                    <CommandList>
+                                      <CommandEmpty>Nenhum cliente encontrado.</CommandEmpty>
+                                      <CommandGroup>
+                                        {filteredClients.map((client) => (
+                                          <CommandItem
+                                            key={client.id}
+                                            value={client.id}
+                                            onSelect={() => {
+                                              form.setValue('client_id', client.id, { shouldDirty: true });
+                                              setClientComboboxOpen(false);
+                                              setClientSearch('');
+                                            }}
+                                          >
+                                            <div className="flex flex-col">
+                                              <span>{client.name || client.email}</span>
+                                              <span className="text-xs text-muted-foreground">
+                                                {client.email}{client.phone ? ` • ${client.phone}` : ''}
+                                              </span>
+                                            </div>
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                              <FormMessage />
+                            </FormItem>
+                          );
+                        }}
                       />
                     ) : (
                       <div className="space-y-4 p-4 border border-primary/30 rounded-lg bg-card/50">
@@ -836,76 +662,6 @@ export default function AdminOrders() {
                         </FormItem>
                       )}
                     />
-                    {/* Campos extras editáveis pelo admin */}
-                    <FormField
-                      control={form.control}
-                      name="estimated_completion"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Previsão de Conclusão</FormLabel>
-                          <FormControl>
-                            <Input type="date" value={field.value || ''} onChange={field.onChange} />
-                          </FormControl>
-                          <FormDescription>Data prevista para conclusão do serviço</FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="discount_amount"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Desconto (R$)</FormLabel>
-                          <FormControl>
-                            <Input type="number" step="0.01" placeholder="0.00" {...field} />
-                          </FormControl>
-                          <FormDescription>Valor de desconto aplicado (opcional)</FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="discount_reason"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Motivo do Desconto</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Motivo do desconto (opcional)" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="status"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Status</FormLabel>
-                          <FormControl>
-                            <Input placeholder="Status da OS" {...field} />
-                          </FormControl>
-                          <FormDescription>Status atual da ordem de serviço</FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="completed_at"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Data de Conclusão</FormLabel>
-                          <FormControl>
-                            <Input type="datetime-local" value={field.value || ''} onChange={field.onChange} />
-                          </FormControl>
-                          <FormDescription>Data/hora de conclusão (opcional)</FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
 
                     {/* Múltiplas fotos do equipamento */}
                     <div className="space-y-2">
@@ -1017,36 +773,6 @@ export default function AdminOrders() {
                       )}
                     />
 
-                    {/* AI Opening Assistant */}
-                    <AIOpeningAssistant
-                      problemDescription={form.watch('problem_description')}
-                      equipment={form.watch('equipment')}
-                      enabled={aiAssistantEnabled}
-                      onToggle={setAiAssistantEnabled}
-                      onApplyDescription={(description) => {
-                        form.setValue('problem_description', description);
-                      }}
-                    />
-
-                    {/* Web Search Assistant */}
-                    <WebSearchAssistant
-                      context="abertura_os"
-                      placeholder="Ex: Samsung Galaxy S21 problemas comuns de bateria"
-                      title="🔍 Buscar Informações Técnicas"
-                      description="Busque especificações, problemas comuns e informações técnicas na web"
-                      onApplyResult={(insights) => {
-                        const currentDesc = form.watch('problem_description') || '';
-                        let newDesc = currentDesc;
-
-                        if (currentDesc.trim()) {
-                          newDesc = `${currentDesc}\n\n📋 Referências:\n${insights}`;
-                        } else {
-                          newDesc = insights;
-                        }
-
-                        form.setValue('problem_description', newDesc);
-                      }}
-                    />
 
                     {/* Informação sobre data de previsão automática */}
                     <div className="p-4 border rounded-lg bg-muted/30">
@@ -1062,14 +788,6 @@ export default function AdminOrders() {
                       type="button"
                       variant="outline"
                       onClick={() => {
-                        try {
-                          secureTabStorage.removeItem(FORM_DRAFT_KEY);
-                          secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-                          secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
-                        } catch (e) {
-                          // Storage blocked - ignore
-                        }
-
                         setShowConfirmation(false);
                         setDialogOpen(false);
 
@@ -1083,7 +801,7 @@ export default function AdminOrders() {
                     >
                       Cancelar
                     </Button>
-                    <Button type="submit" disabled={creating || showConfirmation}>
+                    <Button type="submit" disabled={showConfirmation}>
                       Revisar e Confirmar
                     </Button>
                   </div>

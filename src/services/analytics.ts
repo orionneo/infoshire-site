@@ -20,6 +20,19 @@ const HEARTBEAT_MS = 15000;
 // ✅ Fallback em memória (quando Tracking Prevention bloqueia storage)
 let __memDisabledUntil = 0;
 
+function isAdminRoute(): boolean {
+  try {
+    const h = (window.location?.hash || '').trim();
+    if (h.startsWith('#')) {
+      const p = h.slice(1);
+      return p.startsWith('/admin');
+    }
+    return (window.location?.pathname || '').startsWith('/admin');
+  } catch {
+    return false;
+  }
+}
+
 // ============================================
 // SAFE STORAGE
 // ============================================
@@ -98,6 +111,7 @@ const NO_ANALYTICS_PREFIXES = [
  * 🚫 CRITICAL: Admin routes must NEVER run analytics
  */
 export function shouldRunAnalytics(): boolean {
+  if (isAdminRoute()) return false;
   try {
     const path = currentRoutePath();
     // Admin routes - NEVER run analytics
@@ -197,6 +211,7 @@ function handleAnalyticsError(context: string, err: any) {
 // ============================================
 
 export function getOrCreateVisitorId(): string {
+  if (isAdminRoute()) return safeUUID();
   let visitorId = safeGet(localStorage, VISITOR_KEY) || safeGet(sessionStorage, VISITOR_KEY);
 
   if (!visitorId) {
@@ -209,6 +224,7 @@ export function getOrCreateVisitorId(): string {
 }
 
 export function getSessionId(): string {
+  if (isAdminRoute()) return safeUUID();
   let sessionId = safeGet(sessionStorage, SESSION_KEY);
 
   if (!sessionId) {
@@ -278,6 +294,7 @@ let durationUpdateInterval: any | null = null;
 
 export async function trackSessionStart(): Promise<boolean> {
   try {
+    if (isAdminRoute()) return false;
     if (!shouldRunAnalytics()) return false;
     if (safeGet(sessionStorage, SESSION_STARTED_KEY) === 'true') return true;
 
@@ -364,6 +381,7 @@ const trackedPages = new Set<string>();
 
 export async function trackPageView(path: string, title: string): Promise<boolean> {
   try {
+    if (isAdminRoute()) return false;
     if (!shouldRunAnalytics()) return false;
     if (!navigator.onLine) return false;
 
@@ -406,6 +424,7 @@ const trackedEvents = new Set<string>();
 
 export async function trackEvent(eventType: string, eventLabel?: string, pagePath?: string): Promise<boolean> {
   try {
+    if (isAdminRoute()) return false;
     if (!shouldRunAnalytics()) return false;
     if (!navigator.onLine) return false;
 
@@ -440,6 +459,7 @@ export async function trackEvent(eventType: string, eventLabel?: string, pagePat
 }
 
 export function setupClickTracking() {
+  if (isAdminRoute()) return () => {};
   const KEY = '__analytics_click_tracking_attached__';
   if ((window as any)[KEY]) return;
   (window as any)[KEY] = true;

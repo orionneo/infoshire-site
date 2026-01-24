@@ -15,21 +15,30 @@ import { processOfflineQueue } from '@/utils/processOfflineQueue';
 import { installAutoSyncListeners } from '@/utils/autoSync';
 import { setupQueueProcessing } from '@/services/queueProcessor';
 
-function AppShell() {
-  const location = useLocation();
+function AdminShell() {
+  return (
+    <AuthProvider>
+      <RouteGuard>
+        <div className="flex flex-col min-h-screen relative z-10">
+          <main className="flex-grow">
+            <Routes>
+              {routes.map((route, index) => (
+                <Route key={index} path={route.path} element={route.element} />
+              ))}
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </main>
+        </div>
+        <Toaster />
+      </RouteGuard>
+    </AuthProvider>
+  );
+}
+
+function NonAdminShell({ showConnectionStatus }: { showConnectionStatus: boolean }) {
   const autoSyncCleanupRef = useRef<null | (() => void)>(null);
-  const isAdminRoute =
-    location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
 
-  // Mostra checagem de conexão APENAS em rotas autenticadas
-  const showConnectionStatus = location.pathname.startsWith('/client') && !isAdminRoute;
-
-  // ✅ CRITICAL FIX: Admin routes MUST NOT respond to lifecycle events
-  // Lifecycle handlers disabled for admin to prevent session suspension
   useEffect(() => {
-    // 🚫 Admin NÃO usa fila offline nem listeners de lifecycle
-    if (isAdminRoute) return;
-
     const drain = () => {
       void processOfflineQueue();
     };
@@ -61,17 +70,11 @@ function AppShell() {
       document.removeEventListener('visibilitychange', onVisibility);
       window.clearTimeout(t);
     };
-  }, [isAdminRoute]);
+  }, []);
 
-  // ✅ Disable autoSync listeners for admin routes
   useEffect(() => {
-    if (!isAdminRoute && !autoSyncCleanupRef.current) {
+    if (!autoSyncCleanupRef.current) {
       autoSyncCleanupRef.current = installAutoSyncListeners();
-    }
-
-    if (isAdminRoute && autoSyncCleanupRef.current) {
-      autoSyncCleanupRef.current();
-      autoSyncCleanupRef.current = null;
     }
 
     return () => {
@@ -80,9 +83,8 @@ function AppShell() {
         autoSyncCleanupRef.current = null;
       }
     };
-  }, [isAdminRoute]);
+  }, []);
 
-  // ✅ Setup queue processing on app start (called once)
   useEffect(() => {
     console.log('[App] Setting up queue processing listeners...');
     setupQueueProcessing();
@@ -114,6 +116,21 @@ function AppShell() {
       </StatePersistence>
     </AuthProvider>
   );
+}
+
+function AppShell() {
+  const location = useLocation();
+  const isAdminRoute =
+    location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
+
+  // Mostra checagem de conexão APENAS em rotas autenticadas
+  const showConnectionStatus = location.pathname.startsWith('/client') && !isAdminRoute;
+
+  if (isAdminRoute) {
+    return <AdminShell />;
+  }
+
+  return <NonAdminShell showConnectionStatus={showConnectionStatus} />;
 }
 
 const App: React.FC = () => {
