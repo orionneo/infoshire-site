@@ -25,19 +25,10 @@ export default function AdminDashboard() {
   const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Carregar alertas dispensados do localStorage
-  useEffect(() => {
-    const dismissed = localStorage.getItem('dismissedAlerts');
-    if (dismissed) {
-      setDismissedAlerts(JSON.parse(dismissed));
-    }
-  }, []);
-
   // Dispensar alerta
   const dismissAlert = (alertId: string) => {
     const newDismissed = [...dismissedAlerts, alertId];
     setDismissedAlerts(newDismissed);
-    localStorage.setItem('dismissedAlerts', JSON.stringify(newDismissed));
   };
 
   // Filtrar alertas dispensados
