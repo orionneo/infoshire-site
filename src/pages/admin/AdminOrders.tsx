@@ -1,6 +1,6 @@
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { Loader2, Plus, Search, Trash2, UserPlus, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Plus, Search, Trash2, UserPlus, X, ChevronDown, ChevronUp, Edit } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -990,10 +990,12 @@ export default function AdminOrders() {
                 {filteredOrders.map((order) => (
                   <div
                     key={order.id}
-                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent cursor-pointer transition-colors"
-                    onClick={() => navigate(`/admin/orders/${order.id}`)}
+                    className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent transition-colors"
                   >
-                    <div className="flex-1">
+                    <div 
+                      className="flex-1 cursor-pointer"
+                      onClick={() => navigate(`/admin/orders/${order.id}`)}
+                    >
                       <div className="flex items-center gap-3 mb-1">
                         <p className="font-medium">OS #{order.order_number}</p>
                         <OrderStatusBadge status={order.status} />
@@ -1001,8 +1003,21 @@ export default function AdminOrders() {
                       <p className="text-sm text-muted-foreground">{order.equipment}</p>
                       <p className="text-sm text-muted-foreground">Cliente: {order.client.name || order.client.email}</p>
                     </div>
-                    <div className="text-right text-sm text-muted-foreground">
-                      {format(new Date(order.created_at), 'dd/MM/yyyy', { locale: ptBR })}
+                    <div className="flex items-center gap-3">
+                      <div className="text-right text-sm text-muted-foreground hidden sm:block">
+                        {format(new Date(order.created_at), 'dd/MM/yyyy', { locale: ptBR })}
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/admin/orders/${order.id}`);
+                        }}
+                      >
+                        <Edit className="h-4 w-4 mr-1" />
+                        Editar
+                      </Button>
                     </div>
                   </div>
                 ))}

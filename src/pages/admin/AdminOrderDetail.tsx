@@ -66,6 +66,7 @@ export default function AdminOrderDetail() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const [discountDialogOpen, setDiscountDialogOpen] = useState(false);
+  const [editMode, setEditMode] = useState(false);
 
   const [updating, setUpdating] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -85,6 +86,13 @@ export default function AdminOrderDetail() {
       problem_description: '',
       entry_date: '',
       estimated_completion: '',
+      completed_at: '',
+      status: '' as OrderStatus,
+      notes: '',
+      labor_cost: '',
+      parts_cost: '',
+      discount_amount: '',
+      discount_reason: '',
     },
   });
 
@@ -125,6 +133,13 @@ export default function AdminOrderDetail() {
         problem_description: order.problem_description,
         entry_date: order.entry_date ? format(new Date(order.entry_date), 'yyyy-MM-dd') : '',
         estimated_completion: order.estimated_completion ? format(new Date(order.estimated_completion), 'yyyy-MM-dd') : '',
+        completed_at: order.completed_at ? format(new Date(order.completed_at), 'yyyy-MM-dd') : '',
+        status: order.status,
+        notes: '',
+        labor_cost: order.labor_cost ? order.labor_cost.toString() : '',
+        parts_cost: order.parts_cost ? order.parts_cost.toString() : '',
+        discount_amount: order.discount_amount ? order.discount_amount.toString() : '',
+        discount_reason: order.discount_reason || '',
       });
 
       discountForm.reset({
@@ -236,9 +251,16 @@ export default function AdminOrderDetail() {
     try {
       let entryDateISO: string | null = null;
       let estimatedCompletionISO: string | null = null;
+      let completedAtISO: string | null = null;
 
       if (data.entry_date) entryDateISO = data.entry_date + 'T12:00:00.000Z';
       if (data.estimated_completion) estimatedCompletionISO = data.estimated_completion + 'T12:00:00.000Z';
+      if (data.completed_at) completedAtISO = data.completed_at + 'T12:00:00.000Z';
+
+      const laborCost = parseFloat(data.labor_cost) || null;
+      const partsCost = parseFloat(data.parts_cost) || null;
+      const totalCost = (laborCost || 0) + (partsCost || 0);
+      const discountAmount = parseFloat(data.discount_amount) || 0;
 
       await updateServiceOrder(id, {
         equipment: data.equipment,
@@ -246,14 +268,21 @@ export default function AdminOrderDetail() {
         problem_description: data.problem_description,
         entry_date: entryDateISO,
         estimated_completion: estimatedCompletionISO,
+        completed_at: completedAtISO,
+        status: data.status,
+        labor_cost: laborCost,
+        parts_cost: partsCost,
+        total_cost: totalCost > 0 ? totalCost : null,
+        discount_amount: discountAmount,
+        discount_reason: data.discount_reason || null,
       });
 
       toast({
         title: 'Ordem atualizada',
-        description: 'As informações foram atualizadas com sucesso',
+        description: 'Todas as alterações foram salvas com sucesso',
       });
 
-      setEditDialogOpen(false);
+      setEditMode(false);
       loadOrder();
     } catch (error) {
       console.error('Erro ao atualizar ordem:', error);
@@ -675,10 +704,21 @@ Após a aprovação, daremos continuidade ao reparo imediatamente! 🔧`;
 
         {/* Action Buttons - Mobile Optimized */}
         <div className="flex flex-col sm:flex-row gap-2">
-          <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="w-full sm:w-auto h-11 text-base">Atualizar Status</Button>
-            </DialogTrigger>
+          {!editMode ? (
+            <>
+              <Button
+                variant="default"
+                className="w-full sm:w-auto h-11 text-base"
+                onClick={() => setEditMode(true)}
+              >
+                <Edit className="h-4 w-4 mr-2" />
+                Editar OS
+              </Button>
+
+              <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button className="w-full sm:w-auto h-11 text-base">Atualizar Status</Button>
+                </DialogTrigger>
             <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Atualizar Status</DialogTitle>
@@ -834,9 +874,55 @@ Após a aprovação, daremos continuidade ao reparo imediatamente! 🔧`;
             <Brain className="h-4 w-4 mr-2" />
             {showDiagnostic ? 'Ocultar' : 'Diagnóstico IA'}
           </Button>
-
-          {/* restante do seu layout segue igual */}
-          {/* ... (mantive o restante do seu JSX igual ao que você mandou) ... */}
+          </>
+          ) : (
+            <>
+              <Button
+                variant="default"
+                className="w-full sm:w-auto h-11 text-base"
+                onClick={editForm.handleSubmit(onEditSubmit)}
+                disabled={updating}
+              >
+                {updating ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-4 w-4 mr-2" />
+                    Salvar Alterações
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full sm:w-auto h-11 text-base"
+                onClick={() => {
+                  setEditMode(false);
+                  if (order) {
+                    editForm.reset({
+                      equipment: order.equipment,
+                      serial_number: order.serial_number || '',
+                      problem_description: order.problem_description,
+                      entry_date: order.entry_date ? format(new Date(order.entry_date), 'yyyy-MM-dd') : '',
+                      estimated_completion: order.estimated_completion ? format(new Date(order.estimated_completion), 'yyyy-MM-dd') : '',
+                      completed_at: order.completed_at ? format(new Date(order.completed_at), 'yyyy-MM-dd') : '',
+                      status: order.status,
+                      notes: '',
+                      labor_cost: order.labor_cost ? order.labor_cost.toString() : '',
+                      parts_cost: order.parts_cost ? order.parts_cost.toString() : '',
+                      discount_amount: order.discount_amount ? order.discount_amount.toString() : '',
+                      discount_reason: order.discount_reason || '',
+                    });
+                  }
+                }}
+                disabled={updating}
+              >
+                Cancelar
+              </Button>
+            </>
+          )}
         </div>
 
         {/* Timeline de Progresso */}
@@ -871,54 +957,252 @@ Após a aprovação, daremos continuidade ao reparo imediatamente! 🔧`;
               <CardTitle className="text-lg">Informações</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              {/* (mantive seu conteúdo igual) */}
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Cliente</p>
-                <p className="font-medium text-base">{order.client.name || order.client.email}</p>
-                {order.client.phone && <p className="text-sm text-muted-foreground">{order.client.phone}</p>}
-              </div>
+              {!editMode ? (
+                <>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Cliente</p>
+                    <p className="font-medium text-base">{order.client.name || order.client.email}</p>
+                    {order.client.phone && <p className="text-sm text-muted-foreground">{order.client.phone}</p>}
+                  </div>
 
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Equipamento</p>
-                <p className="font-medium text-base">{order.equipment}</p>
-              </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Equipamento</p>
+                    <p className="font-medium text-base">{order.equipment}</p>
+                  </div>
 
-              {order.serial_number && (
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Número de Série (S/N)</p>
-                  <p className="font-medium font-mono text-sm break-all">{order.serial_number}</p>
-                </div>
-              )}
+                  {order.serial_number && (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Número de Série (S/N)</p>
+                      <p className="font-medium font-mono text-sm break-all">{order.serial_number}</p>
+                    </div>
+                  )}
 
-              {order.entry_date && (
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Data de Entrada</p>
-                  <p className="font-medium text-base">{format(new Date(order.entry_date), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
-                </div>
-              )}
+                  {order.entry_date && (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Data de Entrada</p>
+                      <p className="font-medium text-base">{format(new Date(order.entry_date), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
+                    </div>
+                  )}
 
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Problema</p>
-                <p className="font-medium text-base">{order.problem_description}</p>
-              </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Problema</p>
+                    <p className="font-medium text-base">{order.problem_description}</p>
+                  </div>
 
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Status</p>
-                <div className="mt-1">
-                  <OrderStatusBadge status={order.status} />
-                </div>
-              </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Status</p>
+                    <div className="mt-1">
+                      <OrderStatusBadge status={order.status} />
+                    </div>
+                  </div>
 
-              <div>
-                <p className="text-xs text-muted-foreground mb-1">Criado em</p>
-                <p className="font-medium text-base">{format(new Date(order.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
-              </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">Criado em</p>
+                    <p className="font-medium text-base">{format(new Date(order.created_at), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
+                  </div>
 
-              {order.estimated_completion && (
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Previsão de Conclusão</p>
-                  <p className="font-medium text-base">{format(new Date(order.estimated_completion), 'dd/MM/yyyy', { locale: ptBR })}</p>
-                </div>
+                  {order.estimated_completion && (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Previsão de Conclusão</p>
+                      <p className="font-medium text-base">{format(new Date(order.estimated_completion), 'dd/MM/yyyy', { locale: ptBR })}</p>
+                    </div>
+                  )}
+
+                  {order.completed_at && (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Concluído em</p>
+                      <p className="font-medium text-base">{format(new Date(order.completed_at), 'dd/MM/yyyy', { locale: ptBR })}</p>
+                    </div>
+                  )}
+
+                  {(order.labor_cost || order.parts_cost) && (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Custos</p>
+                      {order.labor_cost && <p className="text-sm">Mão de obra: R$ {order.labor_cost.toFixed(2)}</p>}
+                      {order.parts_cost && <p className="text-sm">Peças: R$ {order.parts_cost.toFixed(2)}</p>}
+                      {order.total_cost && <p className="font-medium">Total: R$ {order.total_cost.toFixed(2)}</p>}
+                    </div>
+                  )}
+
+                  {order.discount_amount && order.discount_amount > 0 && (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Desconto</p>
+                      <p className="font-medium">R$ {order.discount_amount.toFixed(2)}</p>
+                      {order.discount_reason && <p className="text-xs text-muted-foreground">{order.discount_reason}</p>}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <Form {...editForm}>
+                  <div className="space-y-4">
+                    <FormField
+                      control={editForm.control}
+                      name="equipment"
+                      rules={{ required: 'Equipamento é obrigatório' }}
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Equipamento</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="serial_number"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Número de Série</FormLabel>
+                          <FormControl>
+                            <Input {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="entry_date"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Data de Entrada</FormLabel>
+                          <FormControl>
+                            <Input type="date" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="problem_description"
+                      rules={{ required: 'Descrição é obrigatória' }}
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Problema</FormLabel>
+                          <FormControl>
+                            <Textarea {...field} rows={4} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="status"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Status</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {allStatuses.map((status) => (
+                                <SelectItem key={status.value} value={status.value}>
+                                  {status.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="estimated_completion"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Previsão de Conclusão</FormLabel>
+                          <FormControl>
+                            <Input type="date" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="completed_at"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Data de Conclusão</FormLabel>
+                          <FormControl>
+                            <Input type="date" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="labor_cost"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Mão de Obra (R$)</FormLabel>
+                          <FormControl>
+                            <Input type="number" step="0.01" placeholder="0.00" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="parts_cost"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Peças (R$)</FormLabel>
+                          <FormControl>
+                            <Input type="number" step="0.01" placeholder="0.00" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="discount_amount"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Desconto (R$)</FormLabel>
+                          <FormControl>
+                            <Input type="number" step="0.01" placeholder="0.00" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={editForm.control}
+                      name="discount_reason"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Motivo do Desconto</FormLabel>
+                          <FormControl>
+                            <Textarea {...field} rows={2} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+                </Form>
               )}
             </CardContent>
           </Card>
