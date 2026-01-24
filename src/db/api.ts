@@ -244,15 +244,12 @@ export async function createServiceOrder(
   // ✅ 1) Cria a OS online - insert com retorno mínimo (id, order_number)
   let inserted: any;
   try {
-    // ✅ Usar abortSignal se fornecido
     const insertQuery = supabase
       .from('service_orders')
       .insert(payload)
       .select('id, order_number');
-    const result = opts?.signal 
-      ? await (insertQuery as any).abortSignal(opts.signal).single()
-      : await insertQuery.single();
-    
+    const result = await insertQuery.single();
+
     if (result.error) {
       // ✅ IDEMPOTÊNCIA: Se falhou por unique constraint (order_number já existe)
       // Trata como sucesso - retorna a ordem existente

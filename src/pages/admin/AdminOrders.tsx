@@ -584,9 +584,8 @@ export default function AdminOrders() {
       };
 
       // Criação resiliente: nunca cancela, sempre finaliza
-      let createdOrder = null;
       try {
-        createdOrder = await createServiceOrder(payload);
+        const createdOrder = await createServiceOrder(payload);
         // Upload resiliente: tenta upload, mas não trava criação
         if (selectedImages.length > 0) {
           for (const file of selectedImages) {
