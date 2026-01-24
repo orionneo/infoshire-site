@@ -54,16 +54,8 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
       attempt: op.attempts + 1,
     });
 
-    // Enviar para Supabase com opção de abort
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), 30000); // 30s timeout
-
     try {
-      const order = await createServiceOrder(op.payload, {
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutHandle);
+      const order = await createServiceOrder(op.payload);
 
       await db.update(op.opId, {
         status: 'done',
@@ -79,7 +71,6 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
 
       console.log(`✅ [QueueProcessor] Op done: ${op.opId}`);
     } catch (sendError: any) {
-      clearTimeout(timeoutHandle);
       throw sendError;
     }
   } catch (error: any) {
