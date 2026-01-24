@@ -124,15 +124,13 @@ export default function AdminOrders() {
       setClients(clientsData.filter((c) => c.role === 'client'));
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
-      toast({
-        title: 'Erro ao carregar dados',
-        description: 'Não foi possível carregar as ordens. Verifique a conexão e tente novamente.',
-        variant: 'destructive',
-      });
+      // Silent fallback: set empty arrays rather than blocking UI
+      setOrders([]);
+      setClients([]);
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     loadData();
