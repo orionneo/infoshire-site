@@ -269,6 +269,13 @@ export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
  * Chamar uma vez ao iniciar a app
  */
 export function setupQueueProcessing(): void {
+  // 🚫 HARD GUARD: NEVER run queue processing in /admin routes
+  const isAdminRoute = location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
+  if (isAdminRoute) {
+    console.debug('[QueueProcessor] Skipped in admin route');
+    return;
+  }
+
   console.log('[QueueProcessor] Setting up auto-processing triggers');
 
   // 1. App startup
