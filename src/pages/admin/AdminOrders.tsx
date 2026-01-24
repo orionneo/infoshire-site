@@ -123,13 +123,20 @@ export default function AdminOrders() {
       new_client_phone: '',
       new_client_password: '123456',
 
-      // Order fields
-      entry_date: '', // ✅ novo: permite data retroativa
+      // Order fields (todos do ServiceOrder)
+      entry_date: '',
       equipment: '',
       serial_number: '',
       equipment_photo_url: '',
       problem_description: '',
       estimated_completion: '',
+      status: '',
+      discount_amount: '',
+      discount_reason: '',
+      completed_at: '',
+      has_multiple_items: false,
+      order_number: '',
+      // Adicione outros campos do ServiceOrder conforme o schema
     },
   });
 
@@ -537,8 +544,7 @@ export default function AdminOrders() {
     try {
       const data = pendingOrderRef.current ?? readDraftFromStorage();
       if (!data) {
-        console.warn('[AdminOrders] ⚠️ UI_CONFIRM_INVALID: no draft data');
-        await logAiEvent('AdminOrders', 'ui_confirm_invalid', { reason: 'no_draft_data' });
+        setCreating(false);
         toast({
           title: 'Dados da OS não encontrados',
           description: 'Não foi possível recuperar o rascunho. Revise a confirmação e tente novamente.',
@@ -547,35 +553,9 @@ export default function AdminOrders() {
         return;
       }
 
-      // Gerar opId e order_number
-      const opId = `createOS_${Date.now()}_${Math.random().toString(16).slice(2)}`;
-      const orderNumber = generateOrderNumber();
-
-      // ✅ Checar DUPLICATA: mesmo order_number já enfileirado?
-      const db = await getPendingOpsDB();
-      const existingOps = await db.getAll('pending');
-      const isDuplicate = existingOps.some((op) => op.order_number === orderNumber && op.status !== 'done' && op.status !== 'error');
-
-      if (isDuplicate) {
-        console.info('[AdminOrders] ℹ️ UI_CONFIRM_DUPLICATE: same order_number already pending');
-        await logAiEvent('AdminOrders', 'ui_confirm_duplicate', { orderNumber, reason: 'same_order_already_pending' });
-        toast({
-          title: 'OS já está em envio',
-          description: 'Esta ordem de serviço já está sendo processada. Aguarde.',
-          variant: 'default',
-        });
-        return;
-      }
-
-      // ✅ ENFILEIRAR SEMPRE (sem guards de creating/elapsed)
-      console.info(`[AdminOrders] ✅ UI_CONFIRM_ENQUEUED: starting enqueue`, { opId, orderNumber });
-      await logAiEvent('AdminOrders', 'ui_confirm_enqueued', { opId, orderNumber });
-
+      setCreating(true);
       let clientId = data.client_id;
       if (isNewClient) {
-        if (import.meta.env.DEV) {
-          console.info('[ADMIN][OS] creating client profile');
-        }
         const newClient = await createClientProfile({
           name: `${data.new_client_first_name} ${data.new_client_last_name}`,
           email: data.new_client_email,
@@ -585,7 +565,7 @@ export default function AdminOrders() {
         clientId = newClient.id;
       }
 
-      // ✅ PREPARAR payload (SEM selectedImages - não são serializáveis)
+      // Monta payload completo
       const payload = {
         client_id: clientId,
         entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
@@ -593,7 +573,7 @@ export default function AdminOrders() {
         serial_number: data.serial_number,
         problem_description: data.problem_description,
         has_multiple_items: hasMultipleItems,
-        order_number: orderNumber,
+        order_number: generateOrderNumber(),
         items: hasMultipleItems
           ? additionalItems.map((it) => ({
               equipment: it.equipment,
@@ -603,50 +583,30 @@ export default function AdminOrders() {
           : undefined,
       };
 
-      // ✅ ENFILEIRAR no IndexedDB
-      await createPendingOp(opId, orderNumber, payload);
-      
-      // ✅ Salvar imagens em memory (não podem ser JSON)
-      if (selectedImages.length > 0) {
-        setOrderImages(orderNumber, selectedImages);
-        console.info(`[AdminOrders] 📸 Saved ${selectedImages.length} images for order ${orderNumber}`);
-      }
-      
-      console.info(`[AdminOrders] ✅ Enqueued in IndexedDB`, { opId, orderNumber });
-
-      // ✅ Toast visual (não bloqueio)
-      toast({
-        title: 'OS em envio',
-        description: 'Sua ordem está sendo criada. Pode trocar de aba sem problema.',
-      });
-
-      // ✅ Limpar UI imediatamente
+      // Criação resiliente: nunca cancela, sempre finaliza
+      let createdOrder = null;
       try {
-        secureTabStorage.removeItem(FORM_DRAFT_KEY);
-        secureTabStorage.removeItem('ORDER_DRAFT_FALLBACK');
-        secureTabStorage.removeItem(PENDING_CONFIRMATION_KEY);
-      } catch (e) {
-        if (import.meta.env.DEV) console.warn('Storage cleanup error (ignored):', e);
+        createdOrder = await createServiceOrder(payload);
+        // Upload resiliente: tenta upload, mas não trava criação
+        if (selectedImages.length > 0) {
+          for (const file of selectedImages) {
+            try {
+              await uploadOrderImage(createdOrder.id, file);
+            } catch (e) {
+              toast({
+                title: 'Falha ao enviar imagem',
+                description: 'A OS foi criada, mas uma ou mais imagens não foram enviadas.',
+                variant: 'destructive',
+              });
+            }
+          }
+        }
+        finalizeCreationSuccess(createdOrder, 'admin');
+      } catch (err: any) {
+        finalizeCreationError(err?.message || 'Falha ao criar ordem.');
       }
-
-      setShowConfirmation(false);
-      setDialogOpen(false);
-      form.reset();
-      setIsNewClient(false);
-      setHasMultipleItems(false);
-      setAdditionalItems([]);
-      setSelectedImages([]);
-      setPendingOrderData(null);
-
-      // ✅ DISPARAR fila (não-bloqueante)
-      console.log(`[AdminOrders] 🚀 ENQUEUED ${opId}, triggering queue processing...`);
-      processPendingQueue({ reason: 'user_click' }).catch((err) => {
-        console.error('Queue processor error:', err);
-        logAiError('AdminOrders', err, { opId });
-      });
     } catch (err: any) {
-      console.error('❌ Erro ao processar clique:', err);
-      await logAiError('AdminOrders', err, {});
+      setCreating(false);
       toast({
         title: 'Erro',
         description: err?.message || 'Falha ao processar ordem.',
@@ -872,6 +832,76 @@ export default function AdminOrders() {
                             <Input placeholder="Ex: ABC123456789" {...field} />
                           </FormControl>
                           <FormDescription>Número de série do equipamento (opcional)</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    {/* Campos extras editáveis pelo admin */}
+                    <FormField
+                      control={form.control}
+                      name="estimated_completion"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Previsão de Conclusão</FormLabel>
+                          <FormControl>
+                            <Input type="date" value={field.value || ''} onChange={field.onChange} />
+                          </FormControl>
+                          <FormDescription>Data prevista para conclusão do serviço</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="discount_amount"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Desconto (R$)</FormLabel>
+                          <FormControl>
+                            <Input type="number" step="0.01" placeholder="0.00" {...field} />
+                          </FormControl>
+                          <FormDescription>Valor de desconto aplicado (opcional)</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="discount_reason"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Motivo do Desconto</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Motivo do desconto (opcional)" {...field} />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="status"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Status</FormLabel>
+                          <FormControl>
+                            <Input placeholder="Status da OS" {...field} />
+                          </FormControl>
+                          <FormDescription>Status atual da ordem de serviço</FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name="completed_at"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Data de Conclusão</FormLabel>
+                          <FormControl>
+                            <Input type="datetime-local" value={field.value || ''} onChange={field.onChange} />
+                          </FormControl>
+                          <FormDescription>Data/hora de conclusão (opcional)</FormDescription>
                           <FormMessage />
                         </FormItem>
                       )}

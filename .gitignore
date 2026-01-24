@@ -6,3 +6,8 @@ dist/
 
 supabase/.temp/
 .env.local
+
+# Agent artifacts
+SWE-agent/
+trajectories/
+swe_problem.md
