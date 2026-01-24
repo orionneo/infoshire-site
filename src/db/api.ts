@@ -249,7 +249,6 @@ export async function createServiceOrder(
       .insert(payload)
       .select('id, order_number');
     const result = await insertQuery.single();
-
     if (result.error) {
       // ✅ IDEMPOTÊNCIA: Se falhou por unique constraint (order_number já existe)
       // Trata como sucesso - retorna a ordem existente
@@ -656,22 +655,21 @@ export async function getSearchEnabled(): Promise<boolean> {
 
 // Search functionality - busca em conteúdo público do site
 export async function searchSiteContent(query: string): Promise<{
-  settings: Array<{ type: string; title: string; content: string; sectionId?: string; url?: string; }>;
+  settings: Array<{ type: string; title: string; content: string; sectionId?: string; url?: string }>;
 }> {
   if (!query || query.trim().length < 2) {
     return { settings: [] };
   }
 
   const searchTerm = query.toLowerCase().trim();
-  
-  // Buscar em todas as configurações do site
+
   const { data: settings, error } = await supabase
     .from('site_settings')
     .select('key, value');
 
   if (error) throw error;
 
-  const results: Array<{ type: string; title: string; content: string; sectionId?: string; url?: string; }> = [];
+  const results: Array<{ type: string; title: string; content: string; sectionId?: string; url?: string }> = [];
 
   // Conteúdo estático das páginas para busca inteligente
   const staticContent = [

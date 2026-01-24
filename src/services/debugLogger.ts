@@ -30,6 +30,19 @@ type AiLogPayload = {
 
 const isDevMode = import.meta.env.DEV;
 
+function isAdminRoute(): boolean {
+  try {
+    const h = (window.location?.hash || '').trim();
+    if (h.startsWith('#')) {
+      const p = h.slice(1);
+      return p.startsWith('/admin');
+    }
+    return (window.location?.pathname || '').startsWith('/admin');
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Log estruturado de evento (nunca quebra)
  * function_name: qual serviço/handler está logando
@@ -41,6 +54,10 @@ export async function logAiEvent(
   eventType: string,
   snapshot?: any
 ): Promise<void> {
+  if (isAdminRoute()) {
+    if (isDevMode) console.debug(`[${functionName}] ${eventType}`, snapshot);
+    return;
+  }
   if (isDevMode) {
     console.info(`[${functionName}] ${eventType}`, snapshot);
   }
@@ -80,6 +97,10 @@ export async function logAiError(
   err: unknown,
   snapshot?: any
 ): Promise<void> {
+  if (isAdminRoute()) {
+    if (isDevMode) console.debug(`[${functionName}] Error (admin suppressed)`, err, snapshot);
+    return;
+  }
   const errorMsg = err instanceof Error ? err.message : String(err);
   const errorStack = err instanceof Error ? err.stack : undefined;
 
@@ -114,6 +135,10 @@ export async function logAiError(
 
 // Backward compat: logDebug agora é alias para logAiEvent
 export async function logDebug(eventType: string, data?: Record<string, any>): Promise<void> {
+  if (isAdminRoute()) {
+    if (isDevMode) console.debug(`[AdminOrders] ${eventType}`, data);
+    return;
+  }
   await logAiEvent('AdminOrders', eventType, data);
 }
 
