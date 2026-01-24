@@ -54,17 +54,9 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
       attempt: op.attempts + 1,
     });
 
-    // Enviar para Supabase com opção de abort
-    const controller = new AbortController();
-    const timeoutHandle = setTimeout(() => controller.abort(), 30000); // 30s timeout
-
+    // Criar order sem AbortController
     try {
-      const order = await createServiceOrder(op.payload, {
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutHandle);
-
+      const order = await createServiceOrder(op.payload);
       await db.update(op.opId, {
         status: 'done',
         order_id: order.id,
@@ -79,7 +71,6 @@ async function processOp(op: PendingOp, reason: ProcessReason): Promise<void> {
 
       console.log(`✅ [QueueProcessor] Op done: ${op.opId}`);
     } catch (sendError: any) {
-      clearTimeout(timeoutHandle);
       throw sendError;
     }
   } catch (error: any) {
@@ -278,6 +269,13 @@ export async function processPendingQueue(opts: ProcessOptions): Promise<void> {
  * Chamar uma vez ao iniciar a app
  */
 export function setupQueueProcessing(): void {
+  // 🚫 HARD GUARD: NEVER run queue processing in /admin routes
+  const isAdminRoute = location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
+  if (isAdminRoute) {
+    console.debug('[QueueProcessor] Skipped in admin route');
+    return;
+  }
+
   console.log('[QueueProcessor] Setting up auto-processing triggers');
 
   // 1. App startup

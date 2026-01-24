@@ -27,7 +27,6 @@ import { safeStorage } from '@/utils/safeStorage';
 import { secureTabStorage } from '@/utils/secureTabStorage';
 import { useToast } from '@/hooks/use-toast';
 import { createPendingOp, getPendingOpsDB } from '@/services/pendingOps';
-import { processPendingQueue, setupQueueProcessing } from '@/services/queueProcessor';
 import { setOrderImages, getOrderImages, clearOrderImages } from '@/services/imageStorage';
 import { logAiEvent, logAiError } from '@/services/debugLogger';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
@@ -221,23 +220,18 @@ export default function AdminOrders() {
       // ✅ fallback offline
       const cache = loadAdminCache();
       if (cache) {
-        setOrders(cache.orders);
-        setClients(cache.clients.filter((c: any) => c.role === 'client'));
-        toast({
-          title: 'Modo offline',
-          description: 'Carreguei dados do cache local. Novas OS/imagens serão sincronizadas ao voltar a conexão.',
-        });
+        setOrders(cache.orders || []);
+        setClients((cache.clients || []).filter((c: any) => c.role === 'client'));
+        // toast offline
       } else {
-        toast({
-          title: 'Sem conexão',
-          description: 'Você está offline e ainda não existe cache local neste dispositivo.',
-          variant: 'destructive',
-        });
+        // no cache, set empty but stop loading
+        setOrders([]);
+        setClients([]);
       }
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -584,34 +578,25 @@ export default function AdminOrders() {
       };
 
       // Criação resiliente: nunca cancela, sempre finaliza
-      let createdOrder = null;
-      try {
-        createdOrder = await createServiceOrder(payload);
-        // Upload resiliente: tenta upload, mas não trava criação
-        if (selectedImages.length > 0) {
-          for (const file of selectedImages) {
-            try {
-              await uploadOrderImage(createdOrder.id, file);
-            } catch (e) {
-              toast({
-                title: 'Falha ao enviar imagem',
-                description: 'A OS foi criada, mas uma ou mais imagens não foram enviadas.',
-                variant: 'destructive',
-              });
-            }
+      const createdOrder = await createServiceOrder(payload);
+      
+      // Upload resiliente: tenta upload, mas não trava criação
+      if (selectedImages.length > 0) {
+        for (const file of selectedImages) {
+          try {
+            await uploadOrderImage(createdOrder.id, file);
+          } catch (e) {
+            toast({
+              title: 'Falha ao enviar imagem',
+              description: 'A OS foi criada, mas uma ou mais imagens não foram enviadas.',
+              variant: 'destructive',
+            });
           }
         }
-        finalizeCreationSuccess(createdOrder, 'admin');
-      } catch (err: any) {
-        finalizeCreationError(err?.message || 'Falha ao criar ordem.');
       }
+      finalizeCreationSuccess(createdOrder, 'admin');
     } catch (err: any) {
-      setCreating(false);
-      toast({
-        title: 'Erro',
-        description: err?.message || 'Falha ao processar ordem.',
-        variant: 'destructive',
-      });
+      finalizeCreationError(err?.message || 'Falha ao criar ordem.');
     }
   };
 

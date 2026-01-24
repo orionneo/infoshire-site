@@ -41,6 +41,12 @@ export async function logAiEvent(
   eventType: string,
   snapshot?: any
 ): Promise<void> {
+  // 🚫 HARD GUARD: NEVER log to ai_errors in admin routes
+  const isAdminRoute = location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
+  if (isAdminRoute) {
+    return; // no-op in admin
+  }
+
   if (isDevMode) {
     console.info(`[${functionName}] ${eventType}`, snapshot);
   }
@@ -80,6 +86,12 @@ export async function logAiError(
   err: unknown,
   snapshot?: any
 ): Promise<void> {
+  // 🚫 HARD GUARD: NEVER log to ai_errors in admin routes
+  const isAdminRoute = location.hash.startsWith('#/admin') || location.pathname.startsWith('/admin');
+  if (isAdminRoute) {
+    return; // no-op in admin
+  }
+
   const errorMsg = err instanceof Error ? err.message : String(err);
   const errorStack = err instanceof Error ? err.stack : undefined;
 
