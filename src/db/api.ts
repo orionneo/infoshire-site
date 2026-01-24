@@ -198,13 +198,9 @@ export async function createServiceOrder(
       serial_number?: string;
       description?: string;
     }>;
-  },
-  opts?: { signal?: AbortSignal }
-): Promise<ServiceOrder> {
-  // ✅ Verificar abort antes de começar
-  if (opts?.signal?.aborted) {
-    throw new DOMException('Operação abortada', 'AbortError');
   }
+): Promise<ServiceOrder> {
+  // 🚫 NUNCA cancelar/criar com AbortController no Admin
 
   // ✅ Exigir sessão: evita POST sem JWT
   const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
