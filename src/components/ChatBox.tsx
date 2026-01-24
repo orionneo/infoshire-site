@@ -31,9 +31,17 @@ import { useAuth } from '@/contexts/AuthContext';
 import { createMessage, deleteMessage, getOrderMessages, updateMessage } from '@/db/api';
 import { supabase } from '@/db/supabase';
 import { useToast } from '@/hooks/use-toast';
-import { addOfflineTask, attachBlob } from '@/utils/offlineQueue';
 import { getMessageImagesBucket } from '@/db/storage';
 import type { MessageWithSender } from '@/types/types';
+
+/**
+ * ✅ CRITICAL: ChatBox must work in Admin without offline queue
+ * Dynamically import offlineQueue only when NOT in admin route
+ */
+const isAdminRoute = () => {
+  if (typeof window === 'undefined') return false;
+  return window.location.hash.startsWith('#/admin') || window.location.pathname.startsWith('/admin');
+};
 
 // Helper: transforma links em <a>
 function formatMessageContent(content: string) {
@@ -219,39 +227,61 @@ export function ChatBox({ orderId }: { orderId: string }) {
         setMessages((prev) => [...prev, { ...message, sender: profile! } as any]);
         toast({ title: 'Sucesso', description: 'Imagem enviada com sucesso' });
       } catch (err) {
-        // ✅ OFFLINE-FIRST: enfileira
-        console.warn('⚠️ Imagem do chat salva offline:', err);
+        // ✅ Admin: Falha sem offline fallback
+        if (isAdminRoute()) {
+          console.error('Admin: Falha ao enviar imagem (sem offline fallback):', err);
+          toast({
+            title: 'Erro ao enviar imagem',
+            description: 'Verifique sua conexão e tente novamente',
+            variant: 'destructive',
+          });
+          return;
+        }
 
-        const taskId = await addOfflineTask({
-          type: 'UPLOAD_MESSAGE_IMAGE',
-          payload: {
+        // ✅ Public/Client: OFFLINE-FIRST - enfileira
+        console.warn('⚠️ Imagem do chat salva offline:', err);
+        
+        try {
+          const { addOfflineTask, attachBlob } = await import('@/utils/offlineQueue');
+
+          const taskId = await addOfflineTask({
+            type: 'UPLOAD_MESSAGE_IMAGE',
+            payload: {
+              order_id: orderId,
+              sender_id: user.id,
+              fileName: safeName,
+              mimeType: fileToUpload.type || 'image/webp',
+              content: '[Imagem]',
+            },
+          } as any);
+
+          await attachBlob(taskId, fileToUpload);
+
+          const localUrl = URL.createObjectURL(fileToUpload);
+          const optimistic: any = {
+            id: `offline-img-${taskId}`,
             order_id: orderId,
             sender_id: user.id,
-            fileName: safeName,
-            mimeType: fileToUpload.type || 'image/webp',
             content: '[Imagem]',
-          },
-        } as any);
+            image_url: localUrl,
+            created_at: new Date().toISOString(),
+            sender: profile!,
+          };
 
-        await attachBlob(taskId, fileToUpload);
+          setMessages((prev) => [...prev, optimistic]);
 
-        const localUrl = URL.createObjectURL(fileToUpload);
-        const optimistic: any = {
-          id: `offline-img-${taskId}`,
-          order_id: orderId,
-          sender_id: user.id,
-          content: '[Imagem]',
-          image_url: localUrl,
-          created_at: new Date().toISOString(),
-          sender: profile!,
-        };
-
-        setMessages((prev) => [...prev, optimistic]);
-
-        toast({
-          title: 'Offline',
-          description: 'Imagem enfileirada e será enviada automaticamente',
-        });
+          toast({
+            title: 'Offline',
+            description: 'Imagem enfileirada e será enviada automaticamente',
+          });
+        } catch (offlineError) {
+          console.error('Erro ao enfileirar imagem offline:', offlineError);
+          toast({
+            title: 'Erro',
+            description: 'Não foi possível preparar a imagem para envio',
+            variant: 'destructive',
+          });
+        }
       }
     } catch (error) {
       console.error('Erro ao enviar imagem:', error);
