@@ -53,7 +53,7 @@ function handleApiError(error: any, context: string): never {
 export async function getAllProfiles(): Promise<Profile[]> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, name, email, phone, role, created_at, updated_at')
+    .select('id, name, email, phone, role, password_changed, created_at, updated_at')
     .order('created_at', { ascending: false });
 
   if (error) throw error;
@@ -1003,9 +1003,12 @@ export async function deleteOrderImage(imageId: string): Promise<void> {
   const urlParts = image.image_url.split('/');
   const fileName = urlParts[urlParts.length - 1];
 
+  // ✅ BUG 3: Usar getOrderImagesBucket() em vez de hardcode
+  const bucket = getOrderImagesBucket();
+
   // Delete from storage
   const { error: storageError } = await supabase.storage
-    .from('app-8pj0bpgfx6v5_order_images')
+    .from(bucket)
     .remove([fileName]);
 
   if (storageError) throw storageError;

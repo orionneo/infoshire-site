@@ -1,6 +1,7 @@
 import { Copy, Key, Loader2, Search, Trash2, Users as UsersIcon, User } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
 import {
   AlertDialog,
@@ -24,6 +25,7 @@ import type { Profile } from '@/types/types';
 
 export default function AdminClients() {
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth(); // ✅ CRITICAL: obter authLoading
   const [clients, setClients] = useState<Profile[]>([]);
   const [filteredClients, setFilteredClients] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,9 +34,15 @@ export default function AdminClients() {
   const [deletingClient, setDeletingClient] = useState<string | null>(null);
   const { toast } = useToast();
 
+  // ✅ CRITICAL: SÓ carregar dados quando Auth estiver pronto
   useEffect(() => {
+    if (authLoading) return; // Aguardar Auth terminar de carregar
+    if (!user) {
+      navigate('/login'); // Sem usuário, redirecionar para login
+      return;
+    }
     loadClients();
-  }, []);
+  }, [authLoading, user, navigate]);
 
   useEffect(() => {
     filterClients();
