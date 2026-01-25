@@ -193,6 +193,7 @@ export async function createServiceOrder(
     estimated_completion?: string;
     has_multiple_items?: boolean;
     order_number?: string;
+    client_request_id?: string;
     items?: Array<{
       equipment: string;
       serial_number?: string;
@@ -225,6 +226,7 @@ export async function createServiceOrder(
     equipment_photo_url?: string | null;
     estimated_completion?: string | null;
     has_multiple_items?: boolean;
+    client_request_id?: string | null;
   } = {
     order_number,
     client_id: order.client_id,
@@ -235,6 +237,7 @@ export async function createServiceOrder(
     equipment_photo_url: order.equipment_photo_url ?? null,
     estimated_completion: order.estimated_completion ?? null,
     has_multiple_items: order.has_multiple_items ?? false,
+    client_request_id: order.client_request_id ?? null,
   };
 
   /**
@@ -244,11 +247,28 @@ export async function createServiceOrder(
   // ✅ 1) Cria a OS online - insert com retorno mínimo (id, order_number)
   let inserted: any;
   try {
-    const insertQuery = supabase
+    let insertQuery = supabase
       .from('service_orders')
       .insert(payload)
       .select('id, order_number');
-    const result = await insertQuery.single();
+    let result;
+    try {
+      result = await insertQuery.single();
+    } catch (e: any) {
+      // Fallback: se erro de coluna inexistente (client_request_id), tenta sem o campo
+      if (e.message && e.message.includes('column') && e.message.includes('client_request_id')) {
+        console.warn('[createServiceOrder] client_request_id não existe, tentando sem o campo');
+        const fallbackPayload = { ...payload };
+        delete fallbackPayload.client_request_id;
+        result = await supabase
+          .from('service_orders')
+          .insert(fallbackPayload)
+          .select('id, order_number')
+          .single();
+      } else {
+        throw e;
+      }
+    }
     if (result.error) {
       // ✅ IDEMPOTÊNCIA: Se falhou por unique constraint (order_number já existe)
       // Trata como sucesso - retorna a ordem existente
@@ -262,7 +282,6 @@ export async function createServiceOrder(
       }
       throw result.error;
     }
-    
     // Se chegou aqui, insert foi sucesso!
     inserted = result;
   } catch (e: any) {
