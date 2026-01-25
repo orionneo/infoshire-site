@@ -2,6 +2,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Loader2, Plus, Search, Trash2, UserPlus, X, ChevronDown, ChevronUp, Edit } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
@@ -68,6 +69,8 @@ export default function AdminOrders() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [slowLoading, setSlowLoading] = useState(false);
+  const [reconciling, setReconciling] = useState(false);
   const [isNewClient, setIsNewClient] = useState(false);
   const [hasMultipleItems, setHasMultipleItems] = useState(false);
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
@@ -124,45 +127,28 @@ export default function AdminOrders() {
   }, [location.state, navigate, location.pathname]);
 
   const loadData = useCallback(async () => {
-    // ✅ Guard contra chamadas concorrentes
     if (loadInFlightRef.current) {
       console.log('[AdminOrders] loadData já em execução, ignorando...');
       return;
     }
-    
     loadInFlightRef.current = true;
-    
+    setSlowLoading(false);
     try {
       setLoading(true);
       setLoadError(null);
-      
-      // ✅ SOFT TIMEOUT: Avisar ao usuário, mas NÃO matar o request
-      let slowWarningShown = false;
-      const slowWarningId = setTimeout(() => {
-        slowWarningShown = true;
-        toast({
-          title: 'Carregando...',
-          description: 'A requisição está demorando mais que o esperado. Aguarde...',
-        });
-      }, 8000);
-      
+      const slowTimeout = setTimeout(() => setSlowLoading(true), 8000);
       const [ordersData, clientsData] = await Promise.all([getAllServiceOrders(), getAllProfiles()]);
-      
-      clearTimeout(slowWarningId); // ✅ Limpar timer
-      
+      clearTimeout(slowTimeout);
+      setSlowLoading(false);
       setOrders(ordersData);
-      // ✅ CRITICAL: ordenar clientes por nome, usar fallback se name vazio
       const filteredAndSorted = clientsData
         .filter((c) => c.role === 'client')
         .map((c) => ({
           ...c,
-          // Fallback: se name vazio, usar email ou phone
           name: c.name || c.email || c.phone || 'Cliente sem nome'
         }))
         .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-      
       setClients(filteredAndSorted);
-      
       if (import.meta.env.DEV) {
         console.log('[AdminOrders] Loaded:', ordersData.length, 'orders,', filteredAndSorted.length, 'clients');
       }
@@ -170,10 +156,8 @@ export default function AdminOrders() {
       console.error('Erro ao carregar dados:', error);
       const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
       setLoadError(`Falha ao carregar dados: ${errorMsg}`);
-      // Set empty arrays to allow UI to render
       setOrders([]);
       setClients([]);
-      
       toast({
         title: 'Erro ao carregar dados',
         description: `Não foi possível carregar ordens e clientes: ${errorMsg}`,
@@ -418,6 +402,8 @@ export default function AdminOrders() {
         clientId = newClient.id;
       }
 
+      // Gera client_request_id e salva pending_create_service_order
+      const clientRequestId = uuidv4();
       const payload = {
         client_id: clientId,
         entry_date: data.entry_date ? dateInputToLocalISOString(data.entry_date) : undefined,
@@ -426,6 +412,7 @@ export default function AdminOrders() {
         problem_description: data.problem_description,
         has_multiple_items: hasMultipleItems,
         order_number: generateOrderNumber(),
+        client_request_id: clientRequestId,
         items: hasMultipleItems
           ? additionalItems.map((it) => ({
               equipment: it.equipment,
@@ -434,10 +421,11 @@ export default function AdminOrders() {
             }))
           : undefined,
       };
+      localStorage.setItem('pending_create_service_order', JSON.stringify({ client_request_id: clientRequestId, started_at: Date.now() }));
 
-      // Criação resiliente: nunca cancela, sempre finaliza
       try {
         const createdOrder = await createServiceOrder(payload);
+        localStorage.removeItem('pending_create_service_order');
         if (selectedImages.length > 0) {
           for (const file of selectedImages) {
             uploadOrderImage(createdOrder.id, file).catch(() => {
@@ -462,15 +450,56 @@ export default function AdminOrders() {
       });
     }
   };
+  // Reconciliação de criação pendente ao montar e ao voltar para aba
+  useEffect(() => {
+    const reconcile = async () => {
+      const pending = localStorage.getItem('pending_create_service_order');
+      if (!pending) return;
+      try {
+        setReconciling(true);
+        const { client_request_id } = JSON.parse(pending);
+        if (!client_request_id) return;
+        // Buscar OS por client_request_id
+        const { data: found, error } = await (window as any).supabase
+          .from('service_orders')
+          .select('*')
+          .eq('client_request_id', client_request_id)
+          .maybeSingle();
+        if (found && found.id) {
+          localStorage.removeItem('pending_create_service_order');
+          setCreating(false);
+          setDialogOpen(false);
+          setShowConfirmation(false);
+          toast({ title: 'Ordem criada', description: `OS ${found.order_number || found.id} (reconciliada)` });
+          loadData();
+        } else {
+          setReconciling(false);
+        }
+      } catch (e) {
+        setReconciling(false);
+      }
+    };
+    reconcile();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') reconcile();
+    };
+    window.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', reconcile);
+    return () => {
+      window.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', reconcile);
+    };
+  }, [loadData, toast]);
 
 
 
 
-  if (loading) {
+  if (loading || reconciling) {
     return (
       <AdminLayout>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          {slowLoading && <span className="ml-4 text-sm text-muted-foreground">Carregando... (lento)</span>}
         </div>
       </AdminLayout>
     );
