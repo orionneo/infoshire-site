@@ -4,18 +4,21 @@ import "./index.css";
 import { AppWrapper } from "./components/common/PageMeta.tsx";
 
 /**
- * ✅ CRITICAL: Dynamic entrypoint + BOUNDARY RELOAD
+ * ✅ CRITICAL: Dynamic entrypoint + ROBUST BOUNDARY RELOAD
  * 
  * Problem: If user navigates from public site to /#/admin without reload,
  * they stay in AppPublic and queueProcessor keeps running.
  * 
- * Solution: Monitor hash changes and force reload when crossing boundary.
+ * Solution: Monitor ALL navigation mechanisms and force reload when crossing boundary:
+ * - hashchange (direct hash changes)
+ * - popstate (back/forward buttons)
+ * - History API interception (pushState/replaceState)
  * 
  * Admin routes MUST use AppAdmin (no queue imports)
  * Public routes use AppPublic (with queue logic)
  */
 
-// Force rebuild - v100 - Boundary reload: force correct entrypoint
+// Force rebuild - v101 - Robust boundary reload with History API interception
 
 function isAdminRoute(hash: string = window.location.hash) {
   return hash.startsWith('#/admin') || window.location.pathname.startsWith('/admin');
@@ -23,8 +26,7 @@ function isAdminRoute(hash: string = window.location.hash) {
 
 let currentMode: 'admin' | 'public' = isAdminRoute() ? 'admin' : 'public';
 
-// ✅ BOUNDARY RELOAD: Watch for route boundary crossing
-window.addEventListener('hashchange', () => {
+function checkBoundaryCrossing() {
   const nowAdmin = isAdminRoute();
   const newMode = nowAdmin ? 'admin' : 'public';
   
@@ -32,7 +34,29 @@ window.addEventListener('hashchange', () => {
     console.log(`[BoundaryReload] Crossing ${currentMode} → ${newMode}, reloading...`);
     window.location.reload();
   }
-});
+}
+
+// ✅ BOUNDARY RELOAD: Watch for route boundary crossing (hashchange)
+window.addEventListener('hashchange', checkBoundaryCrossing);
+
+// ✅ BOUNDARY RELOAD: Watch for back/forward navigation (popstate)
+window.addEventListener('popstate', checkBoundaryCrossing);
+
+// ✅ BOUNDARY RELOAD: Intercept History API (pushState/replaceState)
+const originalPushState = history.pushState;
+const originalReplaceState = history.replaceState;
+
+history.pushState = function(...args) {
+  originalPushState.apply(this, args);
+  // Check after state change
+  setTimeout(checkBoundaryCrossing, 0);
+};
+
+history.replaceState = function(...args) {
+  originalReplaceState.apply(this, args);
+  // Check after state change
+  setTimeout(checkBoundaryCrossing, 0);
+};
 
 async function bootstrap() {
   const root = createRoot(document.getElementById("root")!);
