@@ -18,6 +18,15 @@ import { installAutoSyncListeners } from '@/utils/autoSync';
 import { setupQueueProcessing } from '@/services/queueProcessor';
 
 function PublicShell() {
+  // ✅ CRITICAL: Synchronous guard BEFORE any hooks
+  // If we detect admin route, redirect and abort immediately
+  const hash = window.location.hash;
+  if (hash.startsWith('#/admin') || window.location.pathname.startsWith('/admin')) {
+    console.log('[AppPublic] Admin route detected, redirecting...');
+    window.location.replace(window.location.href);
+    return null;
+  }
+
   const location = useLocation();
   const autoSyncCleanupRef = useRef<null | (() => void)>(null);
   const queueCleanupRef = useRef<null | (() => void)>(null);

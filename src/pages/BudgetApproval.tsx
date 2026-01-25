@@ -227,7 +227,7 @@ export default function BudgetApproval() {
               </p>
             )}
             <Button
-              onClick={() => window.location.href = '/#/'}
+              onClick={() => window.location.href = '/'}
               className="w-full max-w-xs"
               size="lg"
             >
@@ -252,7 +252,7 @@ export default function BudgetApproval() {
               O orçamento foi recusado. O técnico será notificado e entrará em contato para discutir outras opções.
             </p>
             <Button
-              onClick={() => window.location.href = '/#/'}
+              onClick={() => window.location.href = '/'}
               variant="outline"
               className="w-full max-w-xs"
               size="lg"
