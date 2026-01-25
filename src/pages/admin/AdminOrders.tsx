@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Loader2, Plus, Search, Trash2, UserPlus, X, ChevronDown, ChevronUp, Edit } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AdminLayout } from '@/components/layouts/AdminLayout';
@@ -54,6 +54,9 @@ export default function AdminOrders() {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
   const [clientComboboxOpen, setClientComboboxOpen] = useState(false);
+  
+  // ✅ Prevent refetch storm
+  const loadInFlightRef = useRef(false);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -121,30 +124,48 @@ export default function AdminOrders() {
   }, [location.state, navigate, location.pathname]);
 
   const loadData = useCallback(async () => {
+    // ✅ Guard contra chamadas concorrentes
+    if (loadInFlightRef.current) {
+      console.log('[AdminOrders] loadData já em execução, ignorando...');
+      return;
+    }
+    
+    loadInFlightRef.current = true;
+    
     try {
       setLoading(true);
       setLoadError(null);
       
-      // ✅ TIMEOUT DEFENSIVO: Admin nunca pode ficar em loading infinito
-      const timeoutId = setTimeout(() => {
-        setLoading(false);
-        setLoadError('Timeout: Dados demoraram mais de 8s para carregar');
+      // ✅ SOFT TIMEOUT: Avisar ao usuário, mas NÃO matar o request
+      let slowWarningShown = false;
+      const slowWarningId = setTimeout(() => {
+        slowWarningShown = true;
         toast({
-          title: 'Timeout',
-          description: 'A requisição demorou muito. Tente novamente.',
-          variant: 'destructive',
+          title: 'Carregando...',
+          description: 'A requisição está demorando mais que o esperado. Aguarde...',
         });
       }, 8000);
       
       const [ordersData, clientsData] = await Promise.all([getAllServiceOrders(), getAllProfiles()]);
       
-      clearTimeout(timeoutId); // ✅ Cancelar timeout se sucesso
+      clearTimeout(slowWarningId); // ✅ Limpar timer
       
       setOrders(ordersData);
-      // ✅ CRITICAL: ordenar clientes por nome para busca funcionar
-      setClients(clientsData.filter((c) => c.role === 'client').sort((a, b) => 
-        (a.name || '').localeCompare(b.name || '')
-      ));
+      // ✅ CRITICAL: ordenar clientes por nome, usar fallback se name vazio
+      const filteredAndSorted = clientsData
+        .filter((c) => c.role === 'client')
+        .map((c) => ({
+          ...c,
+          // Fallback: se name vazio, usar email ou phone
+          name: c.name || c.email || c.phone || 'Cliente sem nome'
+        }))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      
+      setClients(filteredAndSorted);
+      
+      if (import.meta.env.DEV) {
+        console.log('[AdminOrders] Loaded:', ordersData.length, 'orders,', filteredAndSorted.length, 'clients');
+      }
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
       const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -155,11 +176,12 @@ export default function AdminOrders() {
       
       toast({
         title: 'Erro ao carregar dados',
-        description: 'Não foi possível carregar ordens e clientes. Tente novamente.',
+        description: `Não foi possível carregar ordens e clientes: ${errorMsg}`,
         variant: 'destructive',
       });
     } finally {
       setLoading(false);
+      loadInFlightRef.current = false;
     }
   }, [toast]);
 

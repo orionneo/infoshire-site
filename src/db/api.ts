@@ -53,7 +53,7 @@ function handleApiError(error: any, context: string): never {
 export async function getAllProfiles(): Promise<Profile[]> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('*')
+    .select('id, name, email, phone, role, created_at, updated_at')
     .order('created_at', { ascending: false });
 
   if (error) throw error;

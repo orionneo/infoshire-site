@@ -48,7 +48,6 @@ import {
 } from '@/db/api';
 import { supabase } from '@/db/supabase';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { ApprovalHistory, OrderStatus, OrderStatusHistoryWithUser, ServiceOrderItem, ServiceOrderWithClient } from '@/types/types';
 
@@ -184,26 +183,27 @@ export default function AdminOrderDetail() {
     if (!id) return;
 
     try {
-      // ✅ TIMEOUT DEFENSIVO: Admin nunca pode ficar em loading infinito
-      const timeoutId = setTimeout(() => {
-        setLoading(false);
+      // ✅ SOFT TIMEOUT: Avisar ao usuário, mas NÃO matar o request
+      let slowWarningShown = false;
+      const slowWarningId = setTimeout(() => {
+        slowWarningShown = true;
         toast({
-          title: 'Timeout',
-          description: 'A requisição demorou muito. Tente recarregar a página.',
-          variant: 'destructive',
+          title: 'Carregando...',
+          description: 'A requisição está demorando mais que o esperado. Aguarde...',
         });
       }, 8000);
       
       const data = await getServiceOrder(id);
       
-      clearTimeout(timeoutId); // ✅ Cancelar timeout se sucesso
+      clearTimeout(slowWarningId); // ✅ Limpar timer
       
       setOrder(data);
     } catch (error) {
       console.error('Erro ao carregar ordem:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
       toast({
         title: 'Erro ao carregar ordem',
-        description: 'Não foi possível carregar a ordem de serviço.',
+        description: `Não foi possível carregar a ordem: ${errorMsg}`,
         variant: 'destructive',
       });
     } finally {
