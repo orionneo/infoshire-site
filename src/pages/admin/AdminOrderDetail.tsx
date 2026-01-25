@@ -48,6 +48,7 @@ import {
 } from '@/db/api';
 import { supabase } from '@/db/supabase';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { ApprovalHistory, OrderStatus, OrderStatusHistoryWithUser, ServiceOrderItem, ServiceOrderWithClient } from '@/types/types';
 
