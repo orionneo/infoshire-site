@@ -22,6 +22,7 @@ import { SmartTextarea } from '@/components/ui/SmartTextarea';
 import { Textarea } from '@/components/ui/textarea';
 import { createClientProfile, createServiceOrder, generateOrderNumber, getAllProfiles, getAllServiceOrders, uploadOrderImage } from '@/db/api';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/AuthContext';
 import type { Profile, ServiceOrderWithClient, OrderStatus } from '@/types/types';
 
 type OrderDraft = Record<string, any>;

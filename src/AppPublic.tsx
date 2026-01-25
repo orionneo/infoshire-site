@@ -19,16 +19,12 @@ import { setupQueueProcessing } from '@/services/queueProcessor';
 
 function PublicShell() {
   // ✅ CRITICAL: Synchronous guard BEFORE any hooks
-  // If we detect admin route, redirect and abort immediately
+  // If we detect admin route, abort immediately
   const hash = window.location.hash;
   const path = window.location.pathname;
   
   if (hash.startsWith('#/admin') || path.startsWith('/admin')) {
     console.log('[AppPublic] Admin route detected, aborting PublicShell');
-    // Forçar reload completo para garantir que main.tsx carrega AppAdmin
-    if (!window.location.href.includes('reloaded=1')) {
-      window.location.href = window.location.href + (hash.includes('?') ? '&' : '?') + 'reloaded=1';
-    }
     return null;
   }
 
