@@ -54,7 +54,7 @@ import type { ApprovalHistory, OrderStatus, OrderStatusHistoryWithUser, ServiceO
 export default function AdminOrderDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth(); // ✅ CRITICAL: obter authLoading
   const { toast } = useToast();
 
   const [order, setOrder] = useState<ServiceOrderWithClient | null>(null);
@@ -115,15 +115,18 @@ export default function AdminOrderDetail() {
 
   const selectedStatus = statusForm.watch('status');
 
+  // ✅ CRITICAL: SÓ carregar dados quando Auth estiver pronto
   useEffect(() => {
-    if (id) {
-      loadOrder();
-      loadHistory();
-      loadApprovalHistory();
-      loadAdditionalItems();
-    }
+    if (authLoading) return; // Aguardar Auth terminar de carregar
+    if (!user) return; // Sem usuário, não carregar
+    if (!id) return;
+    
+    loadOrder();
+    loadHistory();
+    loadApprovalHistory();
+    loadAdditionalItems();
+  }, [authLoading, user, id]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
 
   useEffect(() => {
     if (order) {
@@ -180,10 +183,28 @@ export default function AdminOrderDetail() {
     if (!id) return;
 
     try {
+      // ✅ TIMEOUT DEFENSIVO: Admin nunca pode ficar em loading infinito
+      const timeoutId = setTimeout(() => {
+        setLoading(false);
+        toast({
+          title: 'Timeout',
+          description: 'A requisição demorou muito. Tente recarregar a página.',
+          variant: 'destructive',
+        });
+      }, 8000);
+      
       const data = await getServiceOrder(id);
+      
+      clearTimeout(timeoutId); // ✅ Cancelar timeout se sucesso
+      
       setOrder(data);
     } catch (error) {
       console.error('Erro ao carregar ordem:', error);
+      toast({
+        title: 'Erro ao carregar ordem',
+        description: 'Não foi possível carregar a ordem de serviço.',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }

@@ -42,6 +42,7 @@ export default function AdminOrders() {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth(); // ✅ CRITICAL: obter authLoading
   const [orders, setOrders] = useState<ServiceOrderWithClient[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<ServiceOrderWithClient[]>([]);
   const [clients, setClients] = useState<Profile[]>([]);
@@ -122,9 +123,27 @@ export default function AdminOrders() {
     try {
       setLoading(true);
       setLoadError(null);
+      
+      // ✅ TIMEOUT DEFENSIVO: Admin nunca pode ficar em loading infinito
+      const timeoutId = setTimeout(() => {
+        setLoading(false);
+        setLoadError('Timeout: Dados demoraram mais de 8s para carregar');
+        toast({
+          title: 'Timeout',
+          description: 'A requisição demorou muito. Tente novamente.',
+          variant: 'destructive',
+        });
+      }, 8000);
+      
       const [ordersData, clientsData] = await Promise.all([getAllServiceOrders(), getAllProfiles()]);
+      
+      clearTimeout(timeoutId); // ✅ Cancelar timeout se sucesso
+      
       setOrders(ordersData);
-      setClients(clientsData.filter((c) => c.role === 'client'));
+      // ✅ CRITICAL: ordenar clientes por nome para busca funcionar
+      setClients(clientsData.filter((c) => c.role === 'client').sort((a, b) => 
+        (a.name || '').localeCompare(b.name || '')
+      ));
     } catch (error) {
       console.error('Erro ao carregar dados:', error);
       const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -143,9 +162,12 @@ export default function AdminOrders() {
     }
   }, [toast]);
 
+  // ✅ CRITICAL: SÓ carregar dados quando Auth estiver pronto
   useEffect(() => {
+    if (authLoading) return; // Aguardar Auth terminar de carregar
+    if (!user) return; // Sem usuário, não carregar
     loadData();
-  }, [loadData]);
+  }, [authLoading, user, loadData]);
 
   useEffect(() => {
     filterOrders();
@@ -223,6 +245,7 @@ export default function AdminOrders() {
     setFilteredOrders(filtered);
   };
 
+  // ✅ CRITICAL: Busca case-insensitive em nome, email e phone
   const filteredClients = clients.filter((client) => {
     const q = clientSearch.trim().toLowerCase();
     if (!q) return true;

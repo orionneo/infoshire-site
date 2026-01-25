@@ -15,11 +15,13 @@ export default function Login() {
   const location = useLocation();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-    // ✅ Se já estiver autenticado, não deixa ficar na tela de login
+  
+  // ✅ Se já estiver autenticado, redirecionar DIRETO baseado no role
+  // AGUARDA profile carregar para evitar redirect intermediário
   useEffect(() => {
-    if (!user) return;
+    if (!user || !profile) return; // ⚠️ CRITICAL: aguarda profile carregar
 
-    if (profile?.role === 'admin') {
+    if (profile.role === 'admin') {
       navigate('/admin', { replace: true });
       return;
     }
@@ -72,9 +74,8 @@ export default function Login() {
         return;
       }
 
-      // Redirecionar para a página anterior ou para o dashboard
-      const from = (location.state as any)?.from || '/client';
-      navigate(from, { replace: true });
+      // ✅ NÃO redirecionar aqui - deixar useEffect fazer isso quando profile carregar
+      // Isso evita redirect intermediário para /client antes de ir para /admin
     } catch (error) {
       toast({
         title: 'Erro',
