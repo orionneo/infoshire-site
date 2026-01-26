@@ -1,7 +1,7 @@
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ArrowLeft, Check, Edit, ExternalLink, Loader2, Trash2, Tag, Brain } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ChatBox } from '@/components/ChatBox';
@@ -153,22 +153,13 @@ export default function AdminOrderDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [order]);
 
-  const isMobile = useMemo(() => {
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-  }, []);
-
   // ✅ Função única pra abrir WA (apenas em clique)
   const handleOpenWhatsAppClick = () => {
     if (!whatsappUrl) return;
 
     try {
-      if (isMobile) {
-        // PWA/mobile: navegação direta funciona melhor
-        window.location.href = whatsappUrl;
-      } else {
-        // Desktop: nova aba
-        window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-      }
+      // ✅ Sempre redirecionar na mesma aba (PWA-safe)
+      window.location.assign(whatsappUrl);
     } catch (e) {
       console.error('Falha ao abrir WhatsApp:', e);
       toast({
