@@ -1,350 +1,114 @@
 html, body {
-  font-family: "InterDisplay", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-family: "InterDisplay", "Inter", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
-
-/* stylelint-disable */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here.
-All colors MUST be HSL.
-*/
-
 @layer base {
   :root {
-    --radius: 0.5rem;
-    
-    /* InfoShire - Force Dark Mode with Black and Neon Green */
-    --background: 0 0% 0%;
-    --foreground: 0 0% 98%;
-    
-    --card: 0 0% 8%;
-    --card-foreground: 0 0% 98%;
-    
-    --popover: 0 0% 8%;
-    --popover-foreground: 0 0% 98%;
-    
-    /* Primary: Neon Green */
-    --primary: 120 100% 50%;
-    --primary-foreground: 0 0% 0%;
-    
-    /* Secondary: Dark gray */
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 98%;
-    
-    /* Muted: Dark neutral */
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 70%;
-    
-    /* Accent: Neon green accent */
-    --accent: 0 0% 15%;
-    --accent-foreground: 120 100% 50%;
-    
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 0 0% 98%;
-    
-    --border: 0 0% 20%;
-    --input: 0 0% 20%;
-    --ring: 120 100% 50%;
-    
-    /* Success, warning, info states */
-    --success: 120 100% 50%;
-    --warning: 38 92% 50%;
-    --info: 199 89% 48%;
-    
-    /* Chart colors - vibrant neon */
-    --chart-1: 120 100% 50%;
-    --chart-2: 180 100% 50%;
-    --chart-3: 38 92% 60%;
-    --chart-4: 271 81% 65%;
-    --chart-5: 339 90% 60%;
-    
-    /* Sidebar - dark with neon accent */
-    --sidebar-background: 0 0% 0%;
-    --sidebar-foreground: 0 0% 98%;
-    --sidebar-primary: 120 100% 50%;
-    --sidebar-primary-foreground: 0 0% 0%;
-    --sidebar-accent: 0 0% 15%;
-    --sidebar-accent-foreground: 120 100% 50%;
-    --sidebar-border: 0 0% 20%;
-    --sidebar-ring: 120 100% 50%;
+    --radius: 0.9rem;
+    --radius-lg: 1.25rem;
+    --radius-xl: 1.75rem;
+
+    --background: 224 48% 6%;
+    --foreground: 210 40% 96%;
+    --card: 226 35% 11%;
+    --card-foreground: 210 35% 95%;
+    --popover: 226 35% 11%;
+    --popover-foreground: 210 35% 95%;
+
+    --primary: 186 100% 56%;
+    --primary-foreground: 222 47% 7%;
+    --secondary: 271 100% 67%;
+    --secondary-foreground: 216 33% 97%;
+    --accent: 120 100% 57%;
+    --accent-foreground: 222 47% 7%;
+
+    --muted: 228 24% 18%;
+    --muted-foreground: 220 16% 68%;
+    --border: 223 28% 24%;
+    --input: 223 28% 20%;
+    --ring: 186 100% 56%;
+    --destructive: 0 78% 56%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 145 77% 55%;
+    --warning: 38 94% 59%;
+    --info: 199 95% 59%;
   }
 
-  .dark {
-    --background: 0 0% 0%;
-    --foreground: 0 0% 98%;
-    
-    --card: 0 0% 8%;
-    --card-foreground: 0 0% 98%;
-    
-    --popover: 0 0% 8%;
-    --popover-foreground: 0 0% 98%;
-    
-    /* Primary: Bright neon green for dark mode */
-    --primary: 120 100% 50%;
-    --primary-foreground: 0 0% 0%;
-    
-    /* Secondary: Dark gray */
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 98%;
-    
-    /* Muted: Dark neutral */
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 70%;
-    
-    /* Accent: Neon green accent */
-    --accent: 0 0% 15%;
-    --accent-foreground: 120 100% 50%;
-    
-    --destructive: 0 63% 31%;
-    --destructive-foreground: 0 0% 98%;
-    
-    --border: 0 0% 20%;
-    --input: 0 0% 20%;
-    --ring: 120 100% 50%;
-    
-    /* Success, warning, info states */
-    --success: 120 100% 50%;
-    --warning: 38 92% 50%;
-    --info: 199 89% 48%;
-    
-    /* Chart colors - vibrant neon for dark mode */
-    --chart-1: 120 100% 50%;
-    --chart-2: 180 100% 50%;
-    --chart-3: 38 92% 60%;
-    --chart-4: 271 81% 65%;
-    --chart-5: 339 90% 60%;
-    
-    /* Sidebar - dark with neon accent */
-    --sidebar-background: 0 0% 0%;
-    --sidebar-foreground: 0 0% 98%;
-    --sidebar-primary: 120 100% 50%;
-    --sidebar-primary-foreground: 0 0% 0%;
-    --sidebar-accent: 0 0% 15%;
-    --sidebar-accent-foreground: 120 100% 50%;
-    --sidebar-border: 0 0% 20%;
-    --sidebar-ring: 120 100% 50%;
-  }
-}
+  * { @apply border-border; }
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-  
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
+    background-image: radial-gradient(circle at 20% -5%, hsl(var(--primary) / 0.18), transparent 35%), radial-gradient(circle at 80% -10%, hsl(var(--secondary) / 0.12), transparent 40%);
   }
-  
-  /* Force dark mode */
-  html {
-    color-scheme: dark;
+
+  html { color-scheme: dark; }
+
+  h1, h2, h3 {
+    font-family: "Sora", "InterDisplay", "Inter", sans-serif;
+    letter-spacing: -0.02em;
   }
 }
 
 @layer utilities {
-  .gradient-text {
-    background: linear-gradient(135deg, hsl(var(--primary)), hsl(120 100% 40%));
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    color: transparent;
+  .text-gradient-cyber {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(96deg, hsl(var(--foreground)) 0%, hsl(var(--primary)) 42%, hsl(var(--secondary)) 100%);
   }
-  
-  .neon-glow {
-    text-shadow: 0 0 10px hsl(var(--primary)), 0 0 20px hsl(var(--primary)), 0 0 30px hsl(var(--primary));
+
+  .glass-cockpit {
+    background: linear-gradient(145deg, hsl(var(--card) / 0.72), hsl(224 42% 8% / 0.66));
+    border: 1px solid hsl(var(--border) / 0.75);
+    backdrop-filter: blur(14px);
+    box-shadow: 0 8px 32px hsl(225 75% 3% / 0.45), inset 0 1px 0 hsl(var(--foreground) / 0.08);
   }
-  
-  .neon-border {
-    border: 1px solid hsl(var(--primary));
-    box-shadow: 0 0 10px hsl(var(--primary) / 0.5);
+
+  .cyber-glow {
+    box-shadow: 0 0 0 1px hsl(var(--primary) / 0.45), 0 0 18px hsl(var(--primary) / 0.25), 0 0 44px hsl(var(--secondary) / 0.12);
   }
-  
-  .neon-hover {
-    transition: all 0.3s ease;
+
+  .cyber-button {
+    @apply relative overflow-hidden rounded-full transition-all duration-300;
+    border: 1px solid hsl(var(--primary) / 0.45);
+    background: linear-gradient(120deg, hsl(var(--primary) / 0.95), hsl(var(--secondary) / 0.88));
+    color: hsl(var(--primary-foreground));
+    box-shadow: 0 6px 18px hsl(var(--primary) / 0.25);
   }
-  
-  .neon-hover:hover {
+
+  .cyber-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 24px hsl(var(--primary) / 0.34), 0 0 24px hsl(var(--secondary) / 0.2);
+  }
+
+  .cyber-outline {
+    border: 1px solid hsl(var(--primary) / 0.45);
+    background: hsl(var(--background) / 0.5);
+    color: hsl(var(--foreground));
+  }
+
+  .cyber-outline:hover {
     border-color: hsl(var(--primary));
-    box-shadow: 0 0 10px hsl(var(--primary) / 0.5);
+    box-shadow: 0 0 18px hsl(var(--primary) / 0.2);
+    background: hsl(var(--primary) / 0.08);
   }
-  
-  @keyframes float {
-    0%, 100% {
-      transform: translateY(0px);
-    }
-    50% {
-      transform: translateY(-20px);
-    }
-  }
-  
-  .animate-float {
-    animation: float 3s ease-in-out infinite;
-  }
-  
-  @keyframes fadeInUp {
-    from {
-      opacity: 0;
-      transform: translateY(30px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-  
-  .animate-fade-in-up {
-    animation: fadeInUp 0.8s ease-out forwards;
-  }
-  
-  @keyframes slideInLeft {
-    from {
-      opacity: 0;
-      transform: translateX(-30px);
-    }
-    to {
-      opacity: 1;
-      transform: translateX(0);
-    }
-  }
-  
-  .animate-slide-in-left {
-    animation: slideInLeft 0.8s ease-out forwards;
-  }
-  
-  @keyframes pulse-glow {
-    0%, 100% {
-      box-shadow: 0 0 20px hsl(var(--primary) / 0.3);
-    }
-    50% {
-      box-shadow: 0 0 40px hsl(var(--primary) / 0.6);
-    }
-  }
-  
-  .animate-pulse-glow {
-    animation: pulse-glow 2s ease-in-out infinite;
-  }
-  
+
   .hover-lift {
     transition: transform 0.3s ease, box-shadow 0.3s ease;
   }
-  
+
   .hover-lift:hover {
-    transform: translateY(-8px);
-    box-shadow: 0 10px 30px hsl(var(--primary) / 0.3);
-  }
-  
-  /* Gamer aesthetic utilities */
-  .gamer-grid {
-    background-image: 
-      linear-gradient(hsl(var(--primary) / 0.05) 1px, transparent 1px),
-      linear-gradient(90deg, hsl(var(--primary) / 0.05) 1px, transparent 1px);
-    background-size: 50px 50px;
-  }
-  
-  .circuit-pattern {
-    background-image: 
-      radial-gradient(circle at 20% 50%, hsl(var(--primary) / 0.1) 0%, transparent 50%),
-      radial-gradient(circle at 80% 80%, hsl(var(--primary) / 0.08) 0%, transparent 50%);
-  }
-  
-  /* Premium Button Utilities */
-  .btn-premium {
-    position: relative;
-    overflow: hidden;
-    border: 1px solid hsl(var(--primary) / 0.6);
-    box-shadow: 0 0 15px hsl(var(--primary) / 0.3), inset 0 0 10px hsl(var(--primary) / 0.1);
-    transition: all 0.3s ease;
-  }
-  
-  .btn-premium::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.4), transparent);
-    transition: left 0.5s ease;
-  }
-  
-  .btn-premium:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 0 25px hsl(var(--primary) / 0.5), 0 4px 12px rgba(0, 0, 0, 0.3), inset 0 0 15px hsl(var(--primary) / 0.15);
-    border-color: hsl(var(--primary));
-  }
-  
-  .btn-premium:hover::before {
-    left: 100%;
-  }
-  
-  .btn-premium:focus-visible {
-    outline: none;
-    ring: 2px;
-    ring-color: hsl(var(--primary));
-    ring-offset: 2px;
-  }
-  
-  .btn-premium-outline {
-    position: relative;
-    overflow: hidden;
-    background: hsl(var(--card) / 0.4);
-    backdrop-filter: blur(8px);
-    border: 1px solid hsl(var(--primary) / 0.35);
-    box-shadow: 0 0 10px hsl(var(--primary) / 0.2);
-    transition: all 0.3s ease;
-  }
-  
-  .btn-premium-outline::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.2), transparent);
-    transition: left 0.5s ease;
-  }
-  
-  .btn-premium-outline:hover {
-    transform: translateY(-1px);
-    background: hsl(var(--primary) / 0.1);
-    border-color: hsl(var(--primary));
-    box-shadow: 0 0 20px hsl(var(--primary) / 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
-  }
-  
-  .btn-premium-outline:hover::before {
-    left: 100%;
-  }
-  
-  .btn-premium-outline:focus-visible {
-    outline: none;
-    ring: 2px;
-    ring-color: hsl(var(--primary));
-    ring-offset: 2px;
-  }
-}
-
-@layer base {
-  * {
-    @apply border-border;
+    transform: translateY(-6px);
+    box-shadow: 0 12px 30px hsl(var(--primary) / 0.18);
   }
 
-  body {
-    @apply bg-background text-foreground;
+  @keyframes softFloat {
+    0%,100% { transform: translateY(0px); }
+    50% { transform: translateY(-8px); }
   }
-}
-
-@layer utilities {
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
+  .animate-soft-float { animation: softFloat 5.2s ease-in-out infinite; }
 }

@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Clock, Database, Gamepad2, HardDrive, Laptop, MessageSquare, Monitor, Shield, Star, Tv, Wrench, Zap } from 'lucide-react';
 import React, { useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
 import { PublicLayout } from '@/components/layouts/PublicLayout';
 import { PromotionalPopup } from '@/components/PromotionalPopup';
@@ -72,70 +73,46 @@ export default function Home() {
       <PromotionalPopup />
       
       {/* Hero Section */}
-      <section className="relative bg-transparent py-20 xl:py-32 overflow-hidden">
+      <section className="relative overflow-hidden py-20 xl:py-32">
         <div className="container relative z-10">
-          <div className="max-w-4xl mx-auto text-center">
-            {/* Logo InfoShire */}
-            <div className="mb-12 flex justify-center animate-fade-in-up">
-              <div className="w-full max-w-lg xl:max-w-3xl relative px-4">
-                <div className="absolute inset-0 bg-primary/20 blur-3xl animate-pulse"></div>
-                <img
-                  src="/assets/medo/medo-0a93bf9c85.png"
-                  alt="InfoShire - Games e Informática"
-                  className="relative w-full h-auto object-contain drop-shadow-[0_0_25px_rgba(139,255,0,0.9)] animate-float"
-                />
+          <div className="grid items-center gap-10 xl:grid-cols-[1.05fr_0.95fr]">
+            <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.65 }} className="text-center xl:text-left">
+              <div className="mb-5 inline-flex items-center rounded-full border border-primary/35 bg-primary/10 px-4 py-1.5 text-xs font-semibold tracking-[0.14em] text-primary uppercase">
+                Cyber Lab • Premium Repair Intelligence
               </div>
-            </div>
-            
-            <h1 className="text-3xl xl:text-5xl font-bold mb-6 neon-glow animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
-              Assistência Técnica Eletrônica Especializada
-            </h1>
-            <p className="text-xl xl:text-2xl text-gray-300 mb-8 animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
-              Reparo de eletrônicos, computadores, notebooks e videogames com transparência, tecnologia e mais de 24 anos de experiência
-            </p>
-            
-            {/* Google Rating Badge - Destacado com animação */}
-            <div className="inline-flex items-center gap-3 mb-8 bg-card/80 backdrop-blur-sm px-8 py-4 rounded-full border border-primary/30 animate-pulse-glow animate-slide-in-left" style={{ animationDelay: '0.6s' }}>
-              <svg className="h-8 w-8" viewBox="0 0 48 48" fill="none">
-                <path d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z" fill="#FFC107"/>
-                <path d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z" fill="#FF3D00"/>
-                <path d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0124 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z" fill="#4CAF50"/>
-                <path d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 01-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z" fill="#1976D2"/>
-              </svg>
-              <div className="text-left">
-                <div className="flex items-center gap-2">
-                  <span className="text-3xl font-bold text-primary">4.9</span>
-                  <div className="flex">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <svg key={star} className="h-5 w-5 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                        <path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z" />
-                      </svg>
-                    ))}
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  <span className="font-bold text-primary">600+</span> avaliações reais
-                </p>
+              <h1 className="text-4xl font-bold leading-tight xl:text-6xl text-gradient-cyber">
+                Assistência técnica gamer com precisão de laboratório futurista.
+              </h1>
+              <p className="mt-6 max-w-2xl text-lg text-muted-foreground xl:text-xl">
+                Diagnóstico avançado, transparência total e acompanhamento em tempo real para consoles, PCs e eletrônicos de alta performance.
+              </p>
+              <div className="mt-8 flex flex-col justify-center gap-4 xl:flex-row xl:justify-start">
+                <Button size="lg" onClick={() => navigate('/register')} className="cyber-button h-12 px-8 text-base font-semibold">
+                  Iniciar Atendimento
+                </Button>
+                <Button size="lg" variant="outline" onClick={() => navigate('/services')} className="cyber-outline h-12 px-8 text-base">
+                  Explorar Serviços
+                </Button>
               </div>
-            </div>
-            
-            <div className="flex flex-col xl:flex-row gap-4 justify-center animate-fade-in-up" style={{ animationDelay: '0.8s' }}>
-              <Button 
-                size="lg" 
-                onClick={() => navigate('/register')} 
-                className="text-lg px-8 py-6 bg-primary hover:bg-primary/90 text-black font-semibold shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:scale-105 transition-all duration-300"
-              >
-                Cadastrar Agora
-              </Button>
-              <Button 
-                size="lg" 
-                variant="outline" 
-                onClick={() => navigate('/services')} 
-                className="text-lg px-8 py-6 border-primary/50 text-primary hover:bg-primary/10 hover:border-primary hover:scale-105 transition-all duration-300"
-              >
-                Nossos Serviços
-              </Button>
-            </div>
+            </motion.div>
+
+            <motion.div initial={{ opacity: 0, y: 30, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.72, delay: 0.14 }} className="glass-cockpit cyber-glow relative rounded-3xl p-6 xl:p-8">
+              <div className="mb-6 flex items-center justify-between">
+                <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-primary">Painel Operacional</h3>
+                <span className="rounded-full border border-accent/50 bg-accent/15 px-3 py-1 text-xs text-accent">Online</span>
+              </div>
+              <div className="space-y-4">
+                {['Diagnóstico inteligente em minutos','Rastreamento de OS em tempo real','Mais de 600 avaliações com nota 4.9'].map((item, i) => (
+                  <motion.div key={item} initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.25 + i * 0.1 }} className="rounded-2xl border border-white/10 bg-background/40 p-4">
+                    <p className="text-sm text-foreground">{item}</p>
+                  </motion.div>
+                ))}
+              </div>
+              <div className="mt-6 rounded-2xl border border-primary/25 bg-primary/10 p-4">
+                <p className="text-xs uppercase tracking-[0.12em] text-primary">Reputação</p>
+                <p className="mt-1 text-3xl font-bold">4.9 <span className="text-lg text-muted-foreground">/ 5.0</span></p>
+              </div>
+            </motion.div>
           </div>
         </div>
       </section>
