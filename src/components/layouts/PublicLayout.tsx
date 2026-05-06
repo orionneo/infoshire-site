@@ -12,6 +12,7 @@ import {
   Youtube,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { motion } from 'motion/react';
 import { Link, useNavigate } from 'react-router-dom';
 import { ActionBar } from '@/components/ActionBar';
 import { InstallPWA } from '@/components/common/InstallPWA';
@@ -91,8 +92,8 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
         <InstallPWA />
 
         {/* Header */}
-        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="container flex h-16 items-center justify-between">
+        <motion.header initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ duration: 0.45 }} className="sticky top-0 z-50 w-full border-b border-primary/20 bg-background/65 backdrop-blur-xl supports-[backdrop-filter]:bg-background/40">
+          <div className="container flex h-16 items-center justify-between gap-3">
             <Link to="/" className="flex items-center gap-2">
               {/* Logo Image */}
               <div className="h-12 w-12 flex items-center justify-center">
@@ -105,13 +106,13 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
             </Link>
 
             {/* Desktop Navigation */}
-            <nav className="hidden lg:flex items-center gap-6">
+            <nav className="hidden lg:flex items-center gap-2 rounded-full px-2 py-1 glass-cockpit">
               {navLinks.map((link) => (
                 <Button
                   key={link.to}
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
-                  className="neon-hover"
+                  className="rounded-full text-muted-foreground hover:text-foreground hover:bg-primary/10"
                   onClick={() => navigate(link.to)}
                 >
                   {link.label}
@@ -121,19 +122,19 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
               {/* Admin Access Button - Always Visible */}
               <Button variant="outline" size="sm" className="neon-hover" onClick={() => navigate('/admin')}>
                 <Shield className="h-4 w-4 mr-2" />
-                Painel Admin
+                Admin
               </Button>
             </nav>
 
             {/* Desktop Auth Buttons */}
-            <div className="hidden lg:flex items-center gap-4">
+            <div className="hidden lg:flex items-center gap-3">
               {/* Search Bar - Conditional */}
               {searchEnabled && <SearchBar />}
 
               {/* Action Buttons Premium - WhatsApp e Acompanhar OS */}
               <Button
                 size="sm"
-                className="btn-premium rounded-full h-10 px-6 bg-gradient-to-r from-primary to-primary/90 text-black font-semibold"
+                className="cyber-button h-10 px-6 font-semibold"
                 onClick={() =>
                   window.open(
                     'https://wa.me/5519997744247?text=Olá!%20Gostaria%20de%20solicitar%20um%20orçamento.',
@@ -148,7 +149,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
               <Button
                 size="sm"
                 variant="ghost"
-                className="btn-premium-outline rounded-full h-10 px-6 text-primary font-semibold"
+                className="cyber-outline h-10 px-6 rounded-full font-semibold"
                 onClick={() => navigate('/rastrear-os')}
               >
                 <Shield className="h-4 w-4 mr-2" />
@@ -254,7 +255,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
                     size="icon"
                     className="neon-hover h-9 w-9"
                     onClick={() => navigate('/admin')}
-                    title="Painel Admin"
+                    title="Admin"
                   >
                     <Shield className="h-5 w-5" />
                   </Button>
@@ -273,7 +274,7 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
               )}
             </nav>
           </div>
-        </header>
+        </motion.header>
 
         {/* Main Content */}
         <main className="flex-1">{children}</main>
